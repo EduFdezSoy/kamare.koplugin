@@ -432,8 +432,8 @@ function OPDSBrowser:launchStreamViewer(remote_url, count, username, password, s
 
     local KamareImageViewer = require("kamareimageviewer")
     local viewer = KamareImageViewer:new{
-        image = page_table,
-        _title = item and item.text or "Manga",
+        images_list_data = page_table,
+        title = item and item.text or "Manga",
         fullscreen = true,
         with_title_bar = false, -- We'll handle title bar manually
         image_disposable = false, -- page_table has image_disposable = true
