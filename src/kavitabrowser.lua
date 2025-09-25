@@ -790,9 +790,18 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name)
     }
     local page_table = KavitaClient:streamChapter(chapter.id)
 
+    -- Keep lazy 1-based images list; client converts to 0-based for API
+    local images_list_data = page_table
+
+    -- Convert Kavita's pagesRead (count of pages read) to next 1-based page
     local start_page = 1
-    if type(chapter.pagesRead) == "number" and chapter.pagesRead > 0 and chapter.pagesRead < pages then
-        start_page = chapter.pagesRead
+    if type(chapter.pagesRead) == "number" then
+        local pr = math.max(0, math.floor(chapter.pagesRead))
+        if pr >= pages then
+            start_page = pages
+        else
+            start_page = pr + 1
+        end
     end
 
     local function normalize_authors(a)
@@ -843,6 +852,22 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name)
     do
         local dims, code = KavitaClient:getFileDimensions(chapter.id)
         if type(code) == "number" and code >= 200 and code < 300 and type(dims) == "table" then
+            -- Convert possible 0-based page indices to 1-based for the viewer
+            local zero_based = false
+            for _, d in ipairs(dims) do
+                local pn = d.pageNumber or d.page or d.page_num
+                if type(pn) == "number" and pn == 0 then
+                    zero_based = true
+                    break
+                end
+            end
+            if zero_based then
+                for _, d in ipairs(dims) do
+                    if type(d.pageNumber) == "number" then d.pageNumber = d.pageNumber + 1 end
+                    if type(d.page) == "number" then d.page = d.page + 1 end
+                    if type(d.page_num) == "number" then d.page_num = d.page_num + 1 end
+                end
+            end
             preloaded_dimensions = dims
         else
             logger.warn("KavitaBrowser: getFileDimensions failed:", code)
@@ -851,7 +876,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name)
 
     local KamareImageViewer = require("kamareimageviewer")
     local viewer = KamareImageViewer:new{
-        images_list_data = page_table,
+        images_list_data = images_list_data,
         title = metadata.seriesName or _("Manga"),
         fullscreen = true,
         with_title_bar = false,

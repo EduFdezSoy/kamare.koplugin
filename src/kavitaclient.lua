@@ -368,13 +368,14 @@ function KavitaClient:createReaderPageTable(chapter_id, ctx)
         if type(key) ~= "number" then
             return nil
         end
-        -- Kavita pages are 1-based
-        local page = key
+        -- Our page_table is 1-based (Lua). Kavita Reader /image uses 0-based page index.
+        local page1 = key
+        local page0 = math.max(0, (page1 or 1) - 1)
 
         -- Build query
         local query = {
             chapterId  = chapter_id,
-            page       = page,
+            page       = page0,
             extractPdf = "false",
         }
         -- Some deployments require apiKey as query param in addition to Bearer

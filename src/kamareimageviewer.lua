@@ -1150,13 +1150,13 @@ end
 function KamareImageViewer:_postViewProgress()
     if not (self.metadata and KavitaClient and KavitaClient.bearer) then return end
     if self.last_posted_page == self._images_list_cur then return end
-    local page = self._images_list_cur
+    local page1 = self._images_list_cur -- Kavita expects 1-based count of pages read
     UIManager:nextTick(function()
         pcall(function()
-            KavitaClient:postReaderProgressForPage(self.metadata, page)
+            KavitaClient:postReaderProgressForPage(self.metadata, page1)
         end)
     end)
-    self.last_posted_page = page
+    self.last_posted_page = page1
 end
 
 
@@ -1588,6 +1588,9 @@ function KamareImageViewer:onClose()
     end
 
     self:syncAndSaveSettings()
+
+    -- Ensure latest progress is saved (1-based page index)
+    self:_postViewProgress()
 
     if self.title_bar_visible and self.title_bar then
         self.title_bar_visible = false
