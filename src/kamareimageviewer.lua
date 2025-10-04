@@ -65,7 +65,7 @@ local KamareImageViewer = InputContainer:extend{
         time = true,
         battery = Device:hasBattery(),
         percentage = true,
-        book_time_to_read = false,
+        book_time_to_read = true,
         mode = 1,
         item_prefix = "icons",
         text_font_size = 14,
@@ -168,7 +168,6 @@ function KamareImageViewer:_initDocument()
 
     if not self.virtual_document.is_open then
         logger.err("KamareImageViewer: Failed to initialize VirtualImageDocument. Displaying empty screen.")
-        self.is_open = true
     end
 
     self._images_list_nb = self.virtual_document:getPageCount()
@@ -309,9 +308,7 @@ function KamareImageViewer:setZoomMode(mode)
         end
 
         self:updateImageOnly()
-        if self.footer and self.footer:update(self:getFooterState()) then
-            UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-        end
+        self:updateFooter()
 
         UIManager:nextTick(function()
             self:prefetchUpcomingTiles()
@@ -408,7 +405,6 @@ function KamareImageViewer:getFooterState()
         local viewport_h = select(2, self.canvas:getViewportSize())
         if total > 0 then
             local pos = (self.scroll_offset or 0) + viewport_h / 2
-            local Math = require("optmath")
             scroll_progress = Math.clamp(pos / total, 0, 1)
         end
     end
@@ -427,6 +423,12 @@ function KamareImageViewer:getFooterState()
     }
 end
 
+function KamareImageViewer:updateFooter()
+    if self.footer and self.footer:update(self:getFooterState()) then
+        UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
+    end
+end
+
 ------------------------------------------------------------------------
 --  Mode toggles, footer controls
 ------------------------------------------------------------------------
@@ -443,7 +445,7 @@ function KamareImageViewer:cycleToNextValidMode()
     if not self.footer then return self.footer_settings.mode end
     local mode = self.footer:cycleToNextValidMode()
     self:syncAndSaveSettings()
-    self:applyFooterMode()
+    self:updateFooter()
     return mode
 end
 
@@ -451,7 +453,7 @@ function KamareImageViewer:setFooterMode(mode)
     if not (self.footer and self.footer:isValidMode(mode)) then return false end
     self.footer:setMode(mode)
     self:syncAndSaveSettings()
-    self:applyFooterMode()
+    self:updateFooter()
     return true
 end
 
@@ -749,9 +751,7 @@ function KamareImageViewer:_scrollToPage(page)
     local offset = self.virtual_document:getScrollPositionForPage(page, zoom, self:_getRotationAngle())
     self:_setScrollOffset(offset, { silent = true })
     self:_updatePageFromScroll(true)
-    if self.footer and self.footer:update(self:getFooterState()) then
-        UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-    end
+    self:updateFooter()
 end
 
 function KamareImageViewer:_updatePageFromScroll(silent)
@@ -762,15 +762,11 @@ function KamareImageViewer:_updatePageFromScroll(silent)
         if not silent then self:recordViewingTimeIfValid() end
         self._images_list_cur = new_page
         self.current_image_start_time = os.time()
-        if self.footer and self.footer:update(self:getFooterState()) then
-            UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-        end
+        self:updateFooter()
         self:_postViewProgress()
         UIManager:nextTick(function() self:prefetchUpcomingTiles() end)
     elseif not silent then
-        if self.footer and self.footer:update(self:getFooterState()) then
-            UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-        end
+        self:updateFooter()
     end
 end
 
@@ -823,15 +819,11 @@ function KamareImageViewer:_updateCanvasState()
         self.scroll_offset = desired
         self.canvas:setScrollOffset(desired)
         self:_updatePageFromScroll(true)
-        if self.footer and self.footer:update(self:getFooterState()) then
-            UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-        end
+        self:updateFooter()
     else
         self.scroll_offset = 0
         self.canvas:setCenter(0.5, 0.5)
-        if self.footer and self.footer:update(self:getFooterState()) then
-            UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-        end
+        self:updateFooter()
     end
 end
 
@@ -931,8 +923,6 @@ function KamareImageViewer:onSwipe(_, ges)
     elseif dir == "south" then
         if self.scroll_mode then
             self:_scrollBy(-dist)
-        elseif self.scale_factor == 0 then
-            self:onClose()
         end
     end
     return true
@@ -957,9 +947,7 @@ function KamareImageViewer:switchToImageNum(page)
     end
 
     self:updateImageOnly()
-    if self.footer and self.footer:update(self:getFooterState()) then
-        UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
-    end
+    self:updateFooter()
     self:_postViewProgress()
     UIManager:nextTick(function() self:prefetchUpcomingTiles() end)
 end
@@ -1072,10 +1060,6 @@ end
 
 function KamareImageViewer:toggleTitleBar()
     self.title_bar_visible = not self.title_bar_visible
-    self:update()
-end
-
-function KamareImageViewer:applyFooterMode()
     self:update()
 end
 
