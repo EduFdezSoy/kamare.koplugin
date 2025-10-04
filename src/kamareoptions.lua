@@ -2,7 +2,21 @@ local _ = require("gettext")
 
 local KamareOptions = {
     prefix = "kamare",
---[[
+    {
+        icon = "appbar.pageview",
+        options = {
+            {
+                name = "scroll_mode",
+                name_text = _("View Mode"),
+                toggle = {_("page"), _("scroll")},
+                values = {0, 1},
+                default_value = 0,
+                event = "SetScrollMode",
+                args = {0, 1},
+                help_text = _([[- 'page' mode shows only one page of the document at a time.- 'scroll' mode allows you to scroll the pages like you would in a web browser.]]),
+            }
+        }
+    },
     {
         icon = "appbar.pagefit",
         options = {
@@ -10,17 +24,14 @@ local KamareOptions = {
                 name = "zoom_mode_type",
                 name_text = _("Fit"),
                 toggle = {_("full"), _("width"), _("height")},
-                alternate = false,
-                values = {2, 1, 0},
-                default_value = 2,
+                values = {0,1,2},
+                default_value = 0,
                 event = "DefineZoom",
-                args = {2, 1, 0},
-                help_text = _([[Set how the page should be resized to fit the screen.]]--[[
-),
+                args = {0,1,2},
+                help_text = _([[Set how the page should be resized to fit the screen.]]),
             }
         }
     },
-]]
     {
         icon = "appbar.settings",
         options = {

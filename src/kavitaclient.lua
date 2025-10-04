@@ -301,6 +301,24 @@ function KavitaClient:getStreamSeries(name, params)
         method = "POST"
         path = "/api/Series/recently-added-v2"
         body = filter_v2
+    elseif name == "want-to-read" then
+        method = "POST"
+        path = "/api/want-to-read/v2"
+        -- Build FilterV2Dto with want-to-read filter
+        local want_to_read_filter = {
+            statements = {
+                { comparison = 0, field = 21, value = "1" },  -- Format = Archive (manga)
+                { comparison = 0, field = 26, value = "true" }, -- Want to Read = true
+            },
+            combination = 1, -- AND
+            limitTo = 0,
+            sortOptions = {
+                isAscending = true,
+                sortField = 1,
+            },
+        }
+        -- Allow override from params.filter if provided
+        body = (type(params) == "table" and params.filter) or want_to_read_filter
     else
         -- Fallback to Stream endpoint
         method = "GET"
@@ -465,6 +483,22 @@ function KavitaClient:getSearch(queryString, includeChapterAndFiles)
         method = "GET",
         query  = params,
     }, 120, "kavita|search")
+    return data, code, headers, status, body
+end
+
+-- Fetch the continue point chapter for a series: GET /api/Reader/continue-point?seriesId={id}
+-- Returns: chapterDto_tbl, code, headers, status, raw_body
+function KavitaClient:getContinuePoint(seriesId)
+    if seriesId == nil then
+        logger.warn("KavitaClient:getContinuePoint: seriesId is required")
+        return nil, nil, nil, "seriesId required", nil
+    end
+    local path = "/api/Reader/continue-point"
+    logger.dbg("KavitaClient:getContinuePoint:", path, "seriesId=", seriesId)
+    local data, code, headers, status, body = self:apiJSON(path, {
+        method = "GET",
+        query  = { seriesId = seriesId },
+    })
     return data, code, headers, status, body
 end
 
