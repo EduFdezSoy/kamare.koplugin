@@ -1416,5 +1416,4 @@ function KavitaBrowser:onNextPage()
     return Menu.onNextPage(self)
 end
 
-
 return KavitaBrowser

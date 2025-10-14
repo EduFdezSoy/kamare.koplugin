@@ -82,10 +82,6 @@ local KamareImageViewer = InputContainer:extend{
     },
 }
 
-------------------------------------------------------------------------
---  Initialisation & settings
-------------------------------------------------------------------------
-
 function KamareImageViewer:init()
     self:loadSettings()
 
@@ -96,6 +92,9 @@ function KamareImageViewer:init()
     self.image_viewing_times = {}
     self.current_image_start_time = os.time()
     self.title_bar_visible = false
+
+    -- Save initial rotation mode to restore on close
+    self.initial_rotation_mode = Screen:getRotationMode()
 
     if not CanvasContext.device then
         CanvasContext:init(Device)
@@ -381,10 +380,6 @@ function KamareImageViewer:_updateDimensions()
     end
 end
 
-------------------------------------------------------------------------
---  Settings
-------------------------------------------------------------------------
-
 function KamareImageViewer:loadSettings()
     if not self.kamare_settings then
         logger.warn("KIV:loadSettings: no settings object")
@@ -502,10 +497,6 @@ function KamareImageViewer:setZoomMode(mode)
     return true
 end
 
-------------------------------------------------------------------------
---  UI setup
-------------------------------------------------------------------------
-
 function KamareImageViewer:registerKeyEvents()
     if not Device:hasKeys() then return end
     self.key_events = {
@@ -545,10 +536,6 @@ function KamareImageViewer:setupTitleBar()
     }
 end
 
-
-------------------------------------------------------------------------
---  Footer & progress
-------------------------------------------------------------------------
 
 function KamareImageViewer:getTimeEstimate(remaining_images)
     if #self.image_viewing_times == 0 then return _("N/A") end
@@ -613,10 +600,6 @@ function KamareImageViewer:updateFooter()
         UIManager:setDirty(self, "ui", self.footer:getWidget().dimen)
     end
 end
-
-------------------------------------------------------------------------
---  Mode toggles, footer controls
-------------------------------------------------------------------------
 
 function KamareImageViewer:getCurrentFooterMode()
     return (self.footer and self.footer:getMode()) or self.footer_settings.mode
@@ -725,10 +708,6 @@ function KamareImageViewer:initConfigGesListener()
         },
     })
 end
-
-------------------------------------------------------------------------
---  Gesture callbacks
-------------------------------------------------------------------------
 
 function KamareImageViewer:onTapMenu()
     self:toggleTitleBar()
@@ -997,10 +976,6 @@ function KamareImageViewer:onPagePaddingUpdate(value)
     return true
 end
 
-------------------------------------------------------------------------
---  Scroll helpers
-------------------------------------------------------------------------
-
 function KamareImageViewer:_clampScrollOffset(offset)
     if not self.canvas then return offset or 0 end
     local max_offset = self.canvas:getMaxScrollOffset() or 0
@@ -1109,10 +1084,6 @@ function KamareImageViewer:_updatePageFromScroll(silent)
     end
 end
 
-------------------------------------------------------------------------
---  Canvas update & rendering
-------------------------------------------------------------------------
-
 function KamareImageViewer:_updateCanvasState()
     if not (self.canvas and self.virtual_document) then return end
 
@@ -1212,10 +1183,6 @@ function KamareImageViewer:updateImageOnly()
     self:_updateCanvasState()
 end
 
-------------------------------------------------------------------------
---  Prefetching
-------------------------------------------------------------------------
-
 function KamareImageViewer:prefetchUpcomingTiles()
     if not self.virtual_document then return end
     local count = tonumber(self.prefetch_pages) or 0
@@ -1251,10 +1218,6 @@ function KamareImageViewer:prefetchUpcomingTiles()
     end
 end
 
-------------------------------------------------------------------------
---  Gestures: scrolling
-------------------------------------------------------------------------
-
 function KamareImageViewer:onSwipe(_, ges)
     local dir = ges.direction
     local dist = ges.distance
@@ -1270,10 +1233,6 @@ function KamareImageViewer:onSwipe(_, ges)
     end
     return true
 end
-
-------------------------------------------------------------------------
---  Page-mode panning helpers
-------------------------------------------------------------------------
 
 function KamareImageViewer:_canPanInPageMode(direction)
     -- Only applicable in page mode
@@ -1406,10 +1365,6 @@ function KamareImageViewer:_panWithinPage(direction)
     return false
 end
 
-------------------------------------------------------------------------
---  Page navigation & closing
-------------------------------------------------------------------------
-
 function KamareImageViewer:switchToImageNum(page)
     self:recordViewingTimeIfValid()
     page = Math.clamp(page, 1, self._images_list_nb)
@@ -1532,10 +1487,6 @@ function KamareImageViewer:onShowPrevSlice()
     self:_scrollStep(-1)
 end
 
-------------------------------------------------------------------------
---  Next chapter handling
-------------------------------------------------------------------------
-
 function KamareImageViewer:_checkAndOfferNextChapter()
     -- Only proceed if we have metadata and KavitaClient
     if not (self.metadata and KavitaClient and KavitaClient.bearer) then
@@ -1614,10 +1565,6 @@ function KamareImageViewer:_checkAndOfferNextChapter()
     end)
 end
 
-------------------------------------------------------------------------
---  Prefetch progress reporting
-------------------------------------------------------------------------
-
 function KamareImageViewer:_postViewProgress()
     if not (self.metadata and KavitaClient and KavitaClient.bearer) then return end
 
@@ -1641,10 +1588,6 @@ function KamareImageViewer:_postViewProgress()
     end)
     self.last_posted_page = page1
 end
-
-------------------------------------------------------------------------
---  Close handling
-------------------------------------------------------------------------
 
 function KamareImageViewer:onClose()
     -- Close any open next chapter dialog
@@ -1685,6 +1628,12 @@ function KamareImageViewer:onClose()
     self:syncAndSaveSettings()
     self:_postViewProgress()
     self:recordViewingTimeIfValid()
+
+    -- Restore original rotation mode
+    if self.initial_rotation_mode and Screen:getRotationMode() ~= self.initial_rotation_mode then
+        logger.info("KamareImageViewer: Restoring rotation mode to", self.initial_rotation_mode)
+        Screen:setRotationMode(self.initial_rotation_mode)
+    end
 
     if self.title_bar_visible then
         self.title_bar_visible = false
@@ -1732,6 +1681,73 @@ end
 function KamareImageViewer:toggleTitleBar()
     self.title_bar_visible = not self.title_bar_visible
     self:update()
+end
+
+function KamareImageViewer:onSetRotationMode(mode)
+    local old_mode = Screen:getRotationMode()
+    if mode ~= nil and mode ~= old_mode then
+        logger.info("KamareImageViewer: Rotation mode changed from", old_mode, "to", mode)
+        Screen:setRotationMode(mode)
+        self:handleRotation(mode, old_mode)
+    end
+end
+
+function KamareImageViewer:handleRotation(mode, old_mode)
+    -- Check if orientation actually changed (portrait vs landscape)
+    -- LinuxFB-style constants: even = portrait, odd = landscape
+    local matching_orientation = bit.band(mode, 1) == bit.band(old_mode, 1)
+
+    if matching_orientation then
+        -- Same orientation, just rotated 180 degrees - simple repaint
+        UIManager:setDirty(self, "full")
+    else
+        -- Orientation changed (portrait <-> landscape) - need to recalculate layout
+        UIManager:setDirty(nil, "full")
+        local new_screen_size = Screen:getSize()
+
+        -- Update region dimensions
+        self.region = Geom:new{ x = 0, y = 0, w = new_screen_size.w, h = new_screen_size.h }
+
+        -- Update main container dimensions
+        if self[1] then
+            self[1].dimen = self.region
+        end
+
+        -- Recalculate viewer dimensions (this updates self.width and self.height)
+        self:_updateDimensions()
+
+        -- Rebuild title bar with new width
+        if self.title_bar then
+            self.title_bar:free()
+            self:setupTitleBar()
+        end
+
+        -- Rebuild footer with new width
+        if self.footer then
+            self.footer:free()
+            if self.virtual_document and self._images_list_nb > 1 then
+                self.footer = KamareFooter:new{
+                    settings = self.footer_settings,
+                }
+            end
+        end
+
+        -- Rebuild canvas container with new dimensions
+        if self.canvas_container then
+            self.canvas_container.dimen = Geom:new{ w = self.width, h = self.height }
+        end
+
+        -- Mark for page reload to handle new dimensions
+        self._pending_scroll_page = self._images_list_cur
+
+        -- Force canvas to recalculate layout
+        if self.canvas then
+            self.canvas._layout_dirty = true
+        end
+
+        -- Full UI update
+        self:update()
+    end
 end
 
 return KamareImageViewer
