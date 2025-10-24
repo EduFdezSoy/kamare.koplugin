@@ -18,8 +18,8 @@ Tested with kindle paperwhite 2nd gen and kobo libra colour.
 
 ## Installation & Usage
 
-1. Download the latest release of the plugin from the
-2. Copy the `kamare.koplugin` folder to the `plugins` directory of your KOReader installation.
+1. Download the latest `kamare.koplugin.zip` from the [releases page](https://github.com/faparicior/kamare.koplugin/releases/latest).
+2. Extract the ZIP file and copy the `kamare.koplugin` folder to the `plugins` directory of your KOReader installation.
 3. Restart KOReader to load the new plugin.
 4. Open the plugin from the KOReader menu and configure it with your Kavita server details.
 5. Browse and read your manga collection directly from Kavita.
