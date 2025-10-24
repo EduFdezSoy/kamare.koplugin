@@ -21,7 +21,7 @@ Tested with Kindle Paperwhite (2nd gen) and Kobo Libra Colour.
 
 ## Installation & Usage
 
-1. Download the latest `kamare.koplugin.zip` from the [releases page](https://github.com/faparicior/kamare.koplugin/releases/latest).
+1. Download the latest `kamare.koplugin.zip` from the [releases page](https://github.com/fpammer/kamare.koplugin/releases/latest).
 2. Extract the ZIP and copy the `kamare.koplugin` folder into the `plugins` directory of your KOReader installation.
 3. Restart KOReader to load the plugin.
 4. Open the plugin from the KOReader menu and configure it with your Kavita server details.
