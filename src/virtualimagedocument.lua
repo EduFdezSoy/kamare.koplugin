@@ -595,25 +595,6 @@ function VirtualImageDocument:_tileHash(pageno, zoom, rotation, gamma, rect)
     }, "|")
 end
 
-function VirtualImageDocument:getFullPageHash(pageno, zoom, rotation, gamma)
-    -- Override parent to remove zoom from hash - full pages cached at native resolution
-    local qg = math.floor((gamma or 1) * 1000 + 0.5)
-    local color = self.render_color and "color" or "bw"
-    local quality_key = tostring(self.render_quality or -1)
-
-    return table.concat({
-        "nativefullpage",
-        self.file or "",
-        tostring(self.mod_time or 0),
-        tostring(pageno or 0),
-        tostring(rotation or 0),
-        tostring(qg),
-        tostring(self.render_mode or 0),
-        color,
-        quality_key,
-        -- Note: NO zoom in hash - pages are cached at native resolution (but quality-scaled)
-    }, "|")
-end
 
 function VirtualImageDocument:getPageDimensions(pageno, zoom, rotation)
     local native_rect = self:getNativePageDimensions(pageno)
@@ -656,13 +637,8 @@ function VirtualImageDocument:renderPage(pageno, rect, zoom, rotation, page_mode
     -- Create clamped rect - this is what we actually render
     local clamped_rect = Geom:new{ x = offset_x, y = offset_y, w = native_w, h = native_h }
 
-    -- Generate cache hash using REQUESTED rect for cache consistency
-    local hash
-    if rect then
-        hash = self:_tileHash(pageno, zoom, rotation, self.gamma, native_rect)
-    else
-        hash = self:getFullPageHash(pageno, zoom, rotation, self.gamma)
-    end
+    -- Generate cache hash for this tile
+    local hash = self:_tileHash(pageno, zoom, rotation, self.gamma, native_rect)
 
     -- Check native LRU cache first
     local native_tile = VIDCache:getNativeTile(hash)
@@ -939,14 +915,6 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, rotation, tile_px
 end
 
 function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, rotation, tile_px, prefetch_rows, page_mode)
-    -- If no rect is provided, fall back to the full path.
-    if not rect then
-        local full = self:renderPage(pageno, nil, zoom, rotation, page_mode)
-        if not (full and full.bb) then return false end
-        target:blitFrom(full.bb, x, y, 0, 0, full.bb:getWidth(), full.bb:getHeight())
-        return true
-    end
-
     -- Ensure the entire page is split and cached on first tiled retrieval
     self:_preSplitPageTiles(pageno, zoom, rotation, tile_px, page_mode)
 
@@ -1079,10 +1047,6 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ro
 end
 
 function VirtualImageDocument:register(registry)
-end
-
-function VirtualImageDocument:prefetchPage(pageno, zoom, rotation)
-    return self:renderPage(pageno, nil, zoom, rotation)
 end
 
 return VirtualImageDocument

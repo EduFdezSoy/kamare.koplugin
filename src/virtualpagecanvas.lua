@@ -356,16 +356,6 @@ function VirtualPageCanvas:paintTo(target, x, y)
     end
 end
 
-function VirtualPageCanvas:_renderFullPage(page)
-    local ok, tile = pcall(function()
-        return self.document:renderPage(page, nil, self.zoom, self.rotation, true)
-    end)
-    if ok then
-        return tile
-    end
-    logger.warn("VPC:_renderFullPage failed:", tile)
-    return nil
-end
 
 function VirtualPageCanvas:paintSinglePage(target, x, y)
     if not self.document then
@@ -391,39 +381,6 @@ function VirtualPageCanvas:paintSinglePage(target, x, y)
     local scaled_h = page_size.h or 0
     if scaled_w <= 0 or scaled_h <= 0 then
         return
-    end
-
-    -- Try full page render - document handles native caching and scaling
-    local tile = self:_renderFullPage(page)
-    if tile and tile.bb then
-        local img_w = tile.bb:getWidth()
-        local img_h = tile.bb:getHeight()
-
-        if img_w > 0 and img_h > 0 then
-            -- Image fits entirely in viewport - simple center blit
-            if img_w <= viewport_w and img_h <= viewport_h then
-                local dest_x = x + self.padding + math.floor((viewport_w - img_w) / 2)
-                local dest_y = y + self.padding + math.floor((viewport_h - img_h) / 2)
-                target:blitFrom(tile.bb, dest_x, dest_y, 0, 0, img_w, img_h)
-                return
-            end
-
-            -- Image bigger than viewport - blit visible portion
-            local view_w = math.min(viewport_w, img_w)
-            local view_h = math.min(viewport_h, img_h)
-
-            local cx = (self.mode == "page" and self.zoom_mode == 0) and 0.5 or Math.clamp(self.center_x_ratio, 0, 1)
-            local cy = (self.mode == "page" and self.zoom_mode == 0) and 0.5 or Math.clamp(self.center_y_ratio, 0, 1)
-
-            local src_x = Math.clamp(math.floor(cx * img_w - view_w / 2 + 0.5), 0, math.max(0, img_w - view_w))
-            local src_y = Math.clamp(math.floor(cy * img_h - view_h / 2 + 0.5), 0, math.max(0, img_h - view_h))
-
-            local dest_x = x + self.padding + math.floor((viewport_w - view_w) / 2)
-            local dest_y = y + self.padding + math.floor((viewport_h - view_h) / 2)
-
-            target:blitFrom(tile.bb, dest_x, dest_y, src_x, src_y, view_w, view_h)
-            return
-        end
     end
 
     local view_w = math.min(viewport_w, scaled_w)
@@ -454,7 +411,7 @@ function VirtualPageCanvas:paintSinglePage(target, x, y)
     local dest_y = y + self.padding + math.floor((viewport_h - view_h) / 2)
 
     local ok_draw = pcall(function()
-        return self.document:drawPageTiled(target, dest_x, dest_y, rect, page, zoom, rotation, nil, 1, true)
+        return self.document:drawPageTiled(target, dest_x, dest_y, rect, page, zoom, rotation, nil, 1, false)
     end)
     if not ok_draw then
         logger.warn("VPC:paintSinglePage tiled render failed")
