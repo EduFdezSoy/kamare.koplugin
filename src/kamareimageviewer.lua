@@ -145,7 +145,6 @@ function KamareImageViewer:init()
         self:prefetchUpcomingTiles()
         self:_postViewProgress()
 
-        -- Initialize statistics tracking using direct API
         if self.ui and self.ui.statistics and self.doc_settings then
             logger.info("KamareImageViewer: Calling statistics:onReaderReady")
             self.ui.statistics:onReaderReady(self.doc_settings)
@@ -224,8 +223,7 @@ function KamareImageViewer:_setupStatisticsInterface()
 
     logger.info("KamareImageViewer: Setting up statistics interface")
 
-    -- Create a wrapper that provides getCurrentPage() and other methods for statistics
-    -- This delegates to the viewer's state, not the document's state
+    -- Wrapper delegates to viewer state for statistics
     local viewer_ref = self
     local doc_wrapper = setmetatable({}, {
         __index = function(t, k)
@@ -241,14 +239,12 @@ function KamareImageViewer:_setupStatisticsInterface()
         end
     })
 
-    -- Set document reference on both self and self.ui
     self.document = doc_wrapper
     self.ui.document = doc_wrapper
-    -- Statistics plugin also needs document on its own instance
     if self.ui.statistics then
         logger.dbg("KamareImageViewer: Setting document on statistics plugin")
         self.ui.statistics.document = doc_wrapper
-        self.ui.statistics.view = nil  -- Will be set below
+        self.ui.statistics.view = nil
     else
         logger.warn("KamareImageViewer: self.ui.statistics is nil!")
     end
@@ -259,7 +255,6 @@ function KamareImageViewer:_setupStatisticsInterface()
     local partial_md5 = MD5(self.virtual_document.file)
     logger.dbg("KamareImageViewer: Generated MD5 for", self.virtual_document.file, "=", partial_md5)
 
-    -- Create persistent stats storage
     local stats_data = {
         performance_in_pages = {},
         title = self.metadata and self.metadata.localizedName or self.title or "Unknown",
@@ -267,7 +262,6 @@ function KamareImageViewer:_setupStatisticsInterface()
         series = self.metadata and self.metadata.seriesName or "",
     }
 
-    -- Provide doc_settings stub for statistics compatibility
     local doc_settings = {
         readSetting = function(_, key, default)
             if key == "summary" then
@@ -279,7 +273,6 @@ function KamareImageViewer:_setupStatisticsInterface()
             elseif key == "doc_props" then
                 return viewer_ref.ui.doc_props
             elseif key == "stats" then
-                -- Return persistent statistics data
                 return stats_data
             elseif key == "partial_md5_checksum" then
                 return partial_md5
@@ -293,11 +286,9 @@ function KamareImageViewer:_setupStatisticsInterface()
         nilOrFalse = function(_, key) return true end,
     }
 
-    -- Set on both self and self.ui (statistics accesses via self.ui.doc_settings)
     self.doc_settings = doc_settings
     self.ui.doc_settings = doc_settings
 
-    -- Provide doc_props for statistics
     local doc_props = {
         title = self.metadata and self.metadata.localizedName or self.title or "Unknown",
         display_title = self.metadata and self.metadata.localizedName or self.title or "Unknown",
@@ -310,22 +301,18 @@ function KamareImageViewer:_setupStatisticsInterface()
 
     logger.dbg("KamareImageViewer: doc_props =", doc_props.display_title, "pages:", doc_props.pages)
 
-    -- Set on both self and self.ui (statistics accesses via self.ui.doc_props)
     self.doc_props = doc_props
     self.ui.doc_props = doc_props
 
-    -- Provide annotation stub (returns 0 highlights and notes)
     local annotation = {
         getNumberOfHighlightsAndNotes = function()
             return 0, 0
         end
     }
 
-    -- Set on both self and self.ui (statistics accesses via self.ui.annotation)
     self.annotation = annotation
     self.ui.annotation = annotation
 
-    -- Provide menu stub if not present
     if not self.menu then
         self.menu = {
             registerToMainMenu = function() end
@@ -335,7 +322,6 @@ function KamareImageViewer:_setupStatisticsInterface()
     -- Ensure parent's dictionary module has required fields initialized
     -- This prevents crashes during suspend/settings flush
     if self.ui.dictionary then
-        -- Initialize fields that ReaderDictionary expects during onSaveSettings
         if not self.ui.dictionary.preferred_dictionaries then
             self.ui.dictionary.preferred_dictionaries = {}
         end
@@ -345,7 +331,6 @@ function KamareImageViewer:_setupStatisticsInterface()
         self.dictionary = self.ui.dictionary
     end
 
-    -- Provide view stub with footer and state
     local view_stub = {
         footer = {
             maybeUpdateFooter = function()
@@ -360,13 +345,11 @@ function KamareImageViewer:_setupStatisticsInterface()
     }
 
     self.view = view_stub
-    -- Statistics plugin also needs view on its own instance
     if self.ui.statistics then
         self.ui.statistics.view = view_stub
         logger.dbg("KamareImageViewer: Statistics plugin document set?", self.ui.statistics.document ~= nil)
     end
 
-    -- Use parent bookinfo if available
     if not self.bookinfo and self.ui.bookinfo then
         self.bookinfo = self.ui.bookinfo
     end
@@ -392,7 +375,6 @@ function KamareImageViewer:loadSettings()
 
     local settings = self.kamare_settings
 
-    -- Preseed with current state; Configurable will overwrite if present
     self.configurable.footer_mode = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
     self.configurable.scroll_mode = self.scroll_mode and 1 or 0
@@ -417,7 +399,6 @@ function KamareImageViewer:loadSettings()
     self.render_quality = self.configurable.render_quality or -1
     self.background_color = self.configurable.background_color or 1
 
-    -- Ensure configurable has all values with defaults after loading
     self.configurable.footer_mode = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
     self.configurable.scroll_mode = self.scroll_mode and 1 or 0
@@ -428,7 +409,6 @@ function KamareImageViewer:loadSettings()
     self.configurable.page_padding = self.page_padding
     self.configurable.background_color = self.background_color
 
-    -- Save immediately to ensure all defaults are persisted
     self:syncAndSaveSettings()
 end
 
@@ -453,7 +433,6 @@ function KamareImageViewer:saveSettings()
         return
     end
 
-    -- Ensure all values are in configurable before saving
     self.configurable.footer_mode = self.configurable.footer_mode or self.footer_settings.mode
     self.configurable.prefetch_pages = self.configurable.prefetch_pages or self.prefetch_pages
     self.configurable.scroll_mode = self.configurable.scroll_mode ~= nil and self.configurable.scroll_mode or (self.scroll_mode and 1 or 0)
@@ -800,18 +779,15 @@ function KamareImageViewer:onConfigCloseCallback()
             self._pending_scroll_page = self._images_list_cur
             if not self.scroll_mode then
                 self.scroll_offset = 0
-                -- Reset center position when switching to page mode
                 if self.canvas and self.zoom_mode == 0 then
                     self.canvas:setCenter(0.5, 0.5)
                 end
             end
             self:update()
-            -- Force full screen refresh when switching modes
             UIManager:setDirty(self, "ui", self.main_frame.dimen)
         end
     end
 
-    -- Apply all settings from configurable
     local needs_update = false
 
     if self.configurable.page_padding ~= nil and self.configurable.page_padding ~= self.page_padding then
@@ -869,7 +845,6 @@ end
 function KamareImageViewer:onSetPrefetchPages(value)
     local n = tonumber(value)
     if not n then return false end
-    -- Allow -1 for auto mode, otherwise clamp between 0 and 3
     if n ~= -1 then
         n = Math.clamp(n, 0, 3)
     end
@@ -891,7 +866,6 @@ function KamareImageViewer:onSetRenderQuality(quality)
     self.configurable.render_quality = q
     self:syncAndSaveSettings()
 
-    -- Update document if available
     if self.virtual_document then
         self.virtual_document.render_quality = q
         self.virtual_document:clearCache()
@@ -911,7 +885,6 @@ function KamareImageViewer:onSetScrollMode(value)
     self._pending_scroll_page = self._images_list_cur
 
     if self.scroll_mode then
-        -- Force fit-width when entering continuous mode (only mode that makes sense)
         if self.zoom_mode ~= 1 then
             self.zoom_mode = 1
             self.configurable.zoom_mode_type = 1
@@ -921,7 +894,6 @@ function KamareImageViewer:onSetScrollMode(value)
         end
     else
         self.scroll_offset = 0
-        -- When switching to page mode, use full-fit as default
         if self.zoom_mode == 1 then
             self.zoom_mode = 0
             self.configurable.zoom_mode_type = 0
@@ -929,7 +901,6 @@ function KamareImageViewer:onSetScrollMode(value)
                 self.canvas:setZoomMode(0)
             end
         end
-        -- Reset center position when switching to page mode
         if self.canvas and self.zoom_mode == 0 then
             self.canvas:setCenter(0.5, 0.5)
         end
@@ -937,7 +908,6 @@ function KamareImageViewer:onSetScrollMode(value)
 
     self:syncAndSaveSettings()
     self:update()
-    -- Force full screen refresh when switching modes
     UIManager:setDirty(self, "ui", self.main_frame.dimen)
 
     return true
@@ -1091,7 +1061,6 @@ function KamareImageViewer:_scrollStep(direction)
             if self._images_list_cur < self._images_list_nb then
                 self:switchToImageNum(self._images_list_cur + 1)
             else
-                -- Already at the end of the last page, check for next chapter
                 local at_bottom = offset >= total - viewport_h - 1
                 if at_bottom then
                     self:_checkAndOfferNextChapter()
@@ -1132,12 +1101,10 @@ end
 function KamareImageViewer:_updatePageFromScroll(silent)
     if not self.scroll_mode or not self.virtual_document then return end
     local zoom = self:getCurrentZoom()
-    -- Use viewport bottom for page detection so last page is reached when scrolled to the end
     local viewport_w, viewport_h = self.canvas and self.canvas:getViewportSize() or 0, 0
     local check_offset = (self.scroll_offset or 0) + viewport_h
     local new_page = self.virtual_document:getPageAtOffset(check_offset, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
 
-    -- Predictive prefetching: predict if next scroll will cross 70% threshold
     local should_prefetch = false
     if self._images_list_cur < self._images_list_nb then
         local current_page_start = self.virtual_document:getScrollPositionForPage(self._images_list_cur, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
@@ -1149,23 +1116,15 @@ function KamareImageViewer:_updatePageFromScroll(silent)
             local progress_in_page = current_offset - current_page_start
             local page_progress = progress_in_page / current_page_height
 
-            -- Calculate where we'd be after another scroll based on scroll_distance setting
             local step_ratio = (self.scroll_distance or 25) / 100
             local scroll_step = viewport_h * step_ratio
             local predicted_offset = current_offset + scroll_step
             local predicted_progress = (predicted_offset - current_page_start) / current_page_height
 
-            -- Trigger prefetch if we're past 70% OR if next scroll will take us past 70%
-            local threshold = 0.70
+            local threshold = 0.30
             if (page_progress >= threshold or predicted_progress >= threshold) and self._prefetch_triggered_for_page ~= self._images_list_cur then
                 should_prefetch = true
                 self._prefetch_triggered_for_page = self._images_list_cur
-                if predicted_progress >= threshold and page_progress < threshold then
-                    logger.dbg(string.format("KamareImageViewer: Preemptive prefetch at %.1f%% (next scroll will reach %.1f%%) for page %d",
-                        page_progress * 100, predicted_progress * 100, self._images_list_cur))
-                else
-                    logger.dbg(string.format("KamareImageViewer: Predictive prefetch at %.1f%% through page %d", page_progress * 100, self._images_list_cur))
-                end
             end
         end
     end
@@ -1177,18 +1136,14 @@ function KamareImageViewer:_updatePageFromScroll(silent)
         self:updateFooter()
         self:_postViewProgress()
 
-        -- Track page change in statistics using direct API
         if self.ui and self.ui.statistics then
-            logger.dbg("KamareImageViewer: Page changed via scroll to", new_page)
             self.ui.statistics:onPageUpdate(new_page)
         end
 
-        -- Reset prefetch trigger for new page
         self._prefetch_triggered_for_page = nil
-        should_prefetch = true  -- Also prefetch when page changes
+        should_prefetch = true
     elseif not silent then
         self:updateFooter()
-        -- Check if we're at the bottom of the last page and need to post progress
         self:_postViewProgress()
     end
 
@@ -1246,8 +1201,6 @@ function KamareImageViewer:_updateCanvasState()
         self:updateFooter()
     else
         self.scroll_offset = 0
-        -- Only force center to 0.5, 0.5 for full-fit mode
-        -- For fit-width/fit-height, preserve current center position for panning
         if self.zoom_mode == 0 then
             self.canvas:setCenter(0.5, 0.5)
         end
@@ -1272,7 +1225,6 @@ function KamareImageViewer:update()
     end
     self.img_container_h = self.height - self.frame_elements:getSize().h
 
-    -- Update canvas container dimensions
     if self.canvas_container then
         self.canvas_container.dimen = Geom:new{ w = self.width, h = self.img_container_h }
     end
@@ -1298,16 +1250,13 @@ function KamareImageViewer:updateImageOnly()
 end
 
 function KamareImageViewer:calculateAdaptivePrefetch()
-    -- On first page (initial load), only prefetch 1 page for quick startup
     if self._images_list_cur <= 1 and not self._initial_prefetch_done then
         self._initial_prefetch_done = true
         logger.dbg("KamareImageViewer: Initial load - prefetching only 1 page for quick startup")
         return 1
     end
 
-    -- In continuous scroll mode, only prefetch 1 page to avoid blocking
     if self.scroll_mode then
-        logger.dbg("KamareImageViewer: Continuous scroll mode - prefetching only 1 page to avoid blocking")
         return 1
     end
 
@@ -1331,20 +1280,15 @@ function KamareImageViewer:calculateAdaptivePrefetch()
         return 1
     end
 
-    -- Calculate average tile size from current cache contents
     local avg_tile_size
     if count > 0 and total_size > 0 then
         avg_tile_size = total_size / count
-        logger.dbg(string.format("KamareImageViewer: Native cache avg tile size: %.2fMB", avg_tile_size / 1024 / 1024))
     else
-        -- Fallback: conservative estimate (2MB per tile)
         avg_tile_size = 2 * 1024 * 1024
-        logger.dbg("KamareImageViewer: Using fallback avg tile size: 2MB")
     end
 
     local tiles_capacity = math.floor(max_size / avg_tile_size)
 
-    -- Estimate tiles per page from current page (if available)
     local tiles_per_page = 20
     local current_page = self._images_list_cur
     if current_page and self.virtual_document then
@@ -1356,29 +1300,18 @@ function KamareImageViewer:calculateAdaptivePrefetch()
         end
     end
 
-    logger.dbg(string.format("KamareImageViewer: Tile capacity: %d tiles, ~%d tiles per page",
-        tiles_capacity, tiles_per_page))
-
-    -- Prefetch based on cache capacity with different strategies based on utilization
-    -- Calculate how many tiles we'd load per page of prefetch
     local prefetch_pages
     if utilization < 0.5 then
-        -- Cache less than 50% full: aggressive prefetch (up to 3 pages)
         local remaining_tiles = tiles_capacity * (1.0 - utilization)
         local max_pages_by_space = math.floor(remaining_tiles / tiles_per_page)
         prefetch_pages = math.min(3, math.max(1, max_pages_by_space))
     elseif utilization < 0.8 then
-        -- Cache 50-80% full: moderate prefetch (up to 2 pages if they fit)
         local remaining_tiles = tiles_capacity * (1.0 - utilization)
         local max_pages_by_space = math.floor(remaining_tiles / tiles_per_page)
         prefetch_pages = math.min(2, math.max(1, max_pages_by_space))
     else
-        -- Cache >80% full: conservative but still prefetch (1 page)
         prefetch_pages = 1
     end
-
-    logger.dbg(string.format("KamareImageViewer: Adaptive prefetch: %d pages (utilization: %.1f%%, %d tiles remaining)",
-        prefetch_pages, utilization * 100, math.floor(tiles_capacity * (1.0 - utilization))))
 
     return prefetch_pages
 end
@@ -1408,7 +1341,6 @@ function KamareImageViewer:prefetchUpcomingTiles()
         end
     end
 
-    -- Scan upcoming pages to find which ones need prefetching
     local pages_to_prefetch = {}
     local pages_already_cached = {}
     local scan_window = math.min(target_buffer_size + 2, self._images_list_nb - current_page)
@@ -1417,13 +1349,10 @@ function KamareImageViewer:prefetchUpcomingTiles()
         local check_page = current_page + i
         if check_page > self._images_list_nb then break end
 
-        -- Check if page's tiles are cached (not full page, since we use tiling now)
         local page_cached = false
         local native_dims = self.virtual_document:getNativePageDimensions(check_page)
 
         if native_dims and native_dims.w > 0 and native_dims.h > 0 then
-            -- Check if first tile exists - if so, page is likely cached
-            -- (We use 1024px tiles, so check the 0,0 tile)
             local first_tile_rect = Geom:new{ x = 0, y = 0, w = 1024, h = 1024 }
             local hash = self.virtual_document:_tileHash(check_page, zoom, rotation, self.virtual_document.gamma, first_tile_rect)
             local cached = VIDCache:getNativeTile(hash)
@@ -1440,22 +1369,14 @@ function KamareImageViewer:prefetchUpcomingTiles()
     end
 
     if #pages_to_prefetch == 0 then
-        logger.dbg(string.format("KamareImageViewer: No prefetch needed at page %d - next %d pages already cached",
-            current_page, #pages_already_cached))
         return
     end
-
-    logger.dbg(string.format("KamareImageViewer: Prefetch at page %d - prefetching: [%s], already cached: [%s]",
-        current_page,
-        table.concat(pages_to_prefetch, ", "),
-        table.concat(pages_already_cached, ", ")))
 
     for _, page in ipairs(pages_to_prefetch) do
         UIManager:nextTick(function()
             pcall(function()
-                -- Use _preSplitPageTiles to render and cache tiles
                 local page_mode = not self.scroll_mode
-                self.virtual_document:_preSplitPageTiles(page, zoom, rotation, nil, page_mode)
+                self.virtual_document:prefetchPage(page, zoom, rotation, page_mode)
             end)
         end)
     end
@@ -1478,7 +1399,6 @@ function KamareImageViewer:onSwipe(_, ges)
 end
 
 function KamareImageViewer:_canPanInPageMode(direction)
-    -- Only applicable in page mode
     if self.scroll_mode then return false end
     if not (self.canvas and self.virtual_document) then return false end
 
@@ -1492,48 +1412,37 @@ function KamareImageViewer:_canPanInPageMode(direction)
     local zoom = self:getCurrentZoom()
     local rotation = self:_getRotationAngle()
 
-    -- Get effective page dimensions after rotation
     local page_w = dims.w
     local page_h = dims.h
     if rotation % 180 ~= 0 then
         page_w, page_h = page_h, page_w
     end
 
-    -- Scale to current zoom
     local scaled_w = page_w * zoom
     local scaled_h = page_h * zoom
 
-    -- Check if panning is possible based on zoom mode
     if self.zoom_mode == 1 then
-        -- Fit-width: can pan vertically if image height exceeds viewport
         if scaled_h <= viewport_h then return false end
 
-        -- Calculate actual min/max boundaries (accounting for viewport clamping)
         local min_y = viewport_h / (2 * scaled_h)
         local max_y = 1.0 - min_y
 
         local center_y = self.canvas.center_y_ratio or 0.5
         if direction > 0 then
-            -- Moving down/next: check if we can move down
             return center_y < max_y - 1e-3
         else
-            -- Moving up/prev: check if we can move up
             return center_y > min_y + 1e-3
         end
     elseif self.zoom_mode == 2 then
-        -- Fit-height: can pan horizontally if image width exceeds viewport
         if scaled_w <= viewport_w then return false end
 
-        -- Calculate actual min/max boundaries (accounting for viewport clamping)
         local min_x = viewport_w / (2 * scaled_w)
         local max_x = 1.0 - min_x
 
         local center_x = self.canvas.center_x_ratio or 0.5
         if direction > 0 then
-            -- Moving right/next: check if we can move right
             return center_x < max_x - 1e-3
         else
-            -- Moving left/prev: check if we can move left
             return center_x > min_x + 1e-3
         end
     end
@@ -1562,11 +1471,9 @@ function KamareImageViewer:_panWithinPage(direction)
     local step_ratio = (self.scroll_distance or 25) / 100
 
     if self.zoom_mode == 1 then
-        -- Fit-width: pan vertically by viewport percentage
         local scaled_h = page_h * zoom
         if scaled_h <= viewport_h then return false end
 
-        -- Convert viewport-based step to center ratio change
         local step_pixels = viewport_h * step_ratio
         local center_ratio_step = step_pixels / scaled_h
 
@@ -1583,11 +1490,9 @@ function KamareImageViewer:_panWithinPage(direction)
         UIManager:setDirty(self, "partial", self.canvas.dimen)
         return true
     elseif self.zoom_mode == 2 then
-        -- Fit-height: pan horizontally by viewport percentage
         local scaled_w = page_w * zoom
         if scaled_w <= viewport_w then return false end
 
-        -- Convert viewport-based step to center ratio change
         local step_pixels = viewport_w * step_ratio
         local center_ratio_step = step_pixels / scaled_w
 
@@ -1617,7 +1522,6 @@ function KamareImageViewer:switchToImageNum(page)
     self._images_list_cur = page
     self.current_image_start_time = os.time()
 
-    -- Track page change in statistics using direct API
     if self.ui and self.ui.statistics then
         logger.dbg("KamareImageViewer: Page changed via switchToImageNum to", page)
         self.ui.statistics:onPageUpdate(page)
@@ -1628,7 +1532,6 @@ function KamareImageViewer:switchToImageNum(page)
     else
         self.scroll_offset = 0
 
-        -- Reset center position for page mode when switching pages
         if self.canvas and (self.zoom_mode == 1 or self.zoom_mode == 2) then
             local viewport_w, viewport_h = self.canvas:getViewportSize()
             local dims = self.virtual_document:getNativePageDimensions(page)
@@ -1643,10 +1546,8 @@ function KamareImageViewer:switchToImageNum(page)
                 end
 
                 if self.zoom_mode == 1 then
-                    -- Fit-width: horizontal centered, vertical at edge based on direction
                     local scaled_h = page_h * zoom
                     if scaled_h > viewport_h then
-                        -- Calculate minimum/maximum center positions that show actual content
                         local min_y = viewport_h / (2 * scaled_h)
                         local max_y = 1.0 - min_y
                         local new_y = moving_forward and min_y or max_y
@@ -1655,10 +1556,8 @@ function KamareImageViewer:switchToImageNum(page)
                         self.canvas:setCenter(0.5, 0.5)
                     end
                 elseif self.zoom_mode == 2 then
-                    -- Fit-height: vertical centered, horizontal at edge based on direction
                     local scaled_w = page_w * zoom
                     if scaled_w > viewport_w then
-                        -- Calculate minimum/maximum center positions that show actual content
                         local min_x = viewport_w / (2 * scaled_w)
                         local max_x = 1.0 - min_x
                         local new_x = moving_forward and min_x or max_x
@@ -1682,7 +1581,6 @@ function KamareImageViewer:onShowNextImage()
         return
     end
 
-    -- In page mode, try to pan within current page first
     if not self.scroll_mode and self:_canPanInPageMode(1) then
         if self:_panWithinPage(1) then
             return
@@ -1692,7 +1590,6 @@ function KamareImageViewer:onShowNextImage()
     if self._images_list_cur < self._images_list_nb then
         self:switchToImageNum(self._images_list_cur + 1)
     else
-        -- Reached the end, check for next chapter
         self:_checkAndOfferNextChapter()
     end
 end
@@ -1702,7 +1599,6 @@ function KamareImageViewer:onShowPrevImage()
         return
     end
 
-    -- In page mode, try to pan within current page first
     if not self.scroll_mode and self:_canPanInPageMode(-1) then
         if self:_panWithinPage(-1) then
             return
@@ -1731,7 +1627,6 @@ function KamareImageViewer:onShowPrevSlice()
 end
 
 function KamareImageViewer:_checkAndOfferNextChapter()
-    -- Only proceed if we have metadata and KavitaClient
     if not (self.metadata and KavitaClient and KavitaClient.bearer) then
         logger.dbg("KamareImageViewer: Cannot check next chapter - missing metadata or KavitaClient")
         return
@@ -1748,13 +1643,10 @@ function KamareImageViewer:_checkAndOfferNextChapter()
 
     logger.info("KamareImageViewer: Querying next chapter for series", seriesId, "volume", volumeId, "chapter", currentChapterId)
 
-    -- Query for next chapter ID
     UIManager:nextTick(function()
         local nextChapterId, code, headers, status, body = KavitaClient:getNextChapter(seriesId, volumeId, currentChapterId)
 
-        -- Check if result is -1 (no next chapter) or invalid response
         if nextChapterId == -1 or not nextChapterId or type(code) ~= "number" or code < 200 or code >= 300 then
-            -- Show dialog with only Close button (no cancel)
             self.next_chapter_dialog = ButtonDialog:new{
                 title = _("You've reached the end of the series"),
                 title_align = "center",
@@ -1775,7 +1667,6 @@ function KamareImageViewer:_checkAndOfferNextChapter()
             return
         end
 
-        -- Show dialog with only Close and Continue buttons (no cancel)
         self.next_chapter_dialog = ButtonDialog:new{
             title = _("Continue to next chapter?"),
             title_align = "center",
@@ -1794,7 +1685,6 @@ function KamareImageViewer:_checkAndOfferNextChapter()
                         callback = function()
                             UIManager:close(self.next_chapter_dialog)
                             self.next_chapter_dialog = nil
-                            -- Notify parent to load next chapter
                             if self.on_next_chapter_callback then
                                 self.on_next_chapter_callback(nextChapterId)
                             end
@@ -1811,7 +1701,6 @@ end
 function KamareImageViewer:_postViewProgress()
     if not (self.metadata and KavitaClient and KavitaClient.bearer) then return end
 
-    -- In scroll mode, also check if we're at the bottom of the last page
     local at_end = false
     if self.scroll_mode and self._images_list_cur == self._images_list_nb and self.canvas then
         local max_offset = self.canvas:getMaxScrollOffset() or 0
@@ -1820,10 +1709,6 @@ function KamareImageViewer:_postViewProgress()
         end
     end
 
-    -- Determine which page to post:
-    -- - If we're on the last page (regardless of scroll position), post the last page to mark complete
-    -- - If we're at the end of the last page in scroll mode, post the last page
-    -- - Otherwise, post the previous page (the one we just finished reading)
     local page_to_post
     local on_last_page = self._images_list_cur == self._images_list_nb
 
@@ -1833,7 +1718,6 @@ function KamareImageViewer:_postViewProgress()
         page_to_post = math.max(1, self._images_list_cur - 1)
     end
 
-    -- Post if page changed OR if we're at the end of the last page
     if self.last_posted_page == page_to_post and not (at_end or on_last_page) then return end
 
     UIManager:nextTick(function()
@@ -1845,23 +1729,17 @@ function KamareImageViewer:_postViewProgress()
 end
 
 function KamareImageViewer:onClose()
-    -- Close any open next chapter dialog
     if self.next_chapter_dialog then
         UIManager:close(self.next_chapter_dialog)
         self.next_chapter_dialog = nil
     end
 
-    -- Finalize statistics tracking using direct API
     if self.ui and self.ui.statistics then
         logger.info("KamareImageViewer: Calling statistics:onCloseDocument")
         self.ui.statistics:onCloseDocument()
-
-        -- Reset is_doc flag so statistics menu items are disabled after close
-        -- (ReaderUI destroys the statistics instance on close, but we're reusing FileManager's instance)
         self.ui.statistics.is_doc = false
     end
 
-    -- Clear UI state to avoid interfering with FileManager
     if self.ui then
         logger.info("KamareImageViewer: Clearing UI state")
         self.ui.document = nil
@@ -1869,7 +1747,6 @@ function KamareImageViewer:onClose()
         self.ui.doc_props = nil
         self.ui.annotation = nil
 
-        -- Clear statistics plugin state
         if self.ui.statistics then
             self.ui.statistics.document = nil
             self.ui.statistics.view = nil
@@ -1884,7 +1761,6 @@ function KamareImageViewer:onClose()
     self:_postViewProgress()
     self:recordViewingTimeIfValid()
 
-    -- Restore original rotation mode
     if self.initial_rotation_mode and Screen:getRotationMode() ~= self.initial_rotation_mode then
         logger.info("KamareImageViewer: Restoring rotation mode to", self.initial_rotation_mode)
         Screen:setRotationMode(self.initial_rotation_mode)
@@ -1948,36 +1824,27 @@ function KamareImageViewer:onSetRotationMode(mode)
 end
 
 function KamareImageViewer:handleRotation(mode, old_mode)
-    -- Check if orientation actually changed (portrait vs landscape)
-    -- LinuxFB-style constants: even = portrait, odd = landscape
     local matching_orientation = bit.band(mode, 1) == bit.band(old_mode, 1)
 
     if matching_orientation then
-        -- Same orientation, just rotated 180 degrees - simple repaint
         UIManager:setDirty(self, "full")
     else
-        -- Orientation changed (portrait <-> landscape) - need to recalculate layout
         UIManager:setDirty(nil, "full")
         local new_screen_size = Screen:getSize()
 
-        -- Update region dimensions
         self.region = Geom:new{ x = 0, y = 0, w = new_screen_size.w, h = new_screen_size.h }
 
-        -- Update main container dimensions
         if self[1] then
             self[1].dimen = self.region
         end
 
-        -- Recalculate viewer dimensions (this updates self.width and self.height)
         self:_updateDimensions()
 
-        -- Rebuild title bar with new width
         if self.title_bar then
             self.title_bar:free()
             self:setupTitleBar()
         end
 
-        -- Rebuild footer with new width
         if self.footer then
             self.footer:free()
             if self.virtual_document and self._images_list_nb > 1 then
@@ -1987,20 +1854,16 @@ function KamareImageViewer:handleRotation(mode, old_mode)
             end
         end
 
-        -- Rebuild canvas container with new dimensions
         if self.canvas_container then
             self.canvas_container.dimen = Geom:new{ w = self.width, h = self.height }
         end
 
-        -- Mark for page reload to handle new dimensions
         self._pending_scroll_page = self._images_list_cur
 
-        -- Force canvas to recalculate layout
         if self.canvas then
             self.canvas._layout_dirty = true
         end
 
-        -- Full UI update
         self:update()
     end
 end

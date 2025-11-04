@@ -263,6 +263,24 @@ function VirtualPageCanvas:_computeZoomForPage(page)
             result = viewport_h / page_h
         end
     end
+
+    -- Quantize zoom to integer pixels
+    if self.zoom_mode == 1 then -- width
+        local scaled_w = math.floor(page_w * result + 0.5)
+        result = scaled_w / page_w
+    elseif self.zoom_mode == 2 then -- height
+        local scaled_h = math.floor(page_h * result + 0.5)
+        result = scaled_h / page_h
+    else
+        if zoom_w <= zoom_h then
+            local scaled_w = math.floor(page_w * result + 0.5)
+            result = scaled_w / page_w
+        else
+            local scaled_h = math.floor(page_h * result + 0.5)
+            result = scaled_h / page_h
+        end
+    end
+
     return result
 end
 
@@ -282,6 +300,8 @@ function VirtualPageCanvas:_ensureZoom()
             local target_width = entry and entry.rotated_max_width
             if target_width and target_width > 0 then
                 local computed = viewport_w / target_width
+                local scaled_w = math.floor(target_width * computed + 0.5)
+                computed = scaled_w / target_width
                 if computed > 0 and math.abs(computed - (self.zoom or 0)) > 1e-6 then
                     self.zoom = computed
                     self._layout_dirty = true
@@ -391,8 +411,8 @@ function VirtualPageCanvas:paintSinglePage(target, x, y)
     local center_px = cx * scaled_w
     local center_py = cy * scaled_h
 
-    local src_x = Math.clamp(math.floor(center_px - view_w / 2 + 0.5), 0, math.max(0, scaled_w - view_w))
-    local src_y = Math.clamp(math.floor(center_py - view_h / 2 + 0.5), 0, math.max(0, scaled_h - view_h))
+    local src_x = Math.clamp(math.floor(center_px - view_w / 2), 0, math.max(0, scaled_w - view_w))
+    local src_y = Math.clamp(math.floor(center_py - view_h / 2), 0, math.max(0, scaled_h - view_h))
 
     local rect = Geom:new{
         x = src_x / zoom,
@@ -411,7 +431,7 @@ function VirtualPageCanvas:paintSinglePage(target, x, y)
     local dest_y = y + self.padding + math.floor((viewport_h - view_h) / 2)
 
     local ok_draw = pcall(function()
-        return self.document:drawPageTiled(target, dest_x, dest_y, rect, page, zoom, rotation, nil, 1, false)
+        return self.document:drawPageTiled(target, dest_x, dest_y, rect, page, zoom, rotation, nil, 0, true)
     end)
     if not ok_draw then
         logger.warn("VPC:paintSinglePage tiled render failed")
@@ -450,8 +470,8 @@ function VirtualPageCanvas:_renderPageSlice(page_info, zoom, slice_top_px, slice
     if not (top_px and height_px) then
         local vt = page_info.visible_top or page_top
         local vb = page_info.visible_bottom or vt
-        top_px = math.floor((vt - page_top) + 0.5)
-        height_px = math.max(0, math.floor((vb - vt) + 0.5))
+        top_px = math.floor(vt - page_top)
+        height_px = math.max(0, math.floor(vb - vt))
     end
 
 
@@ -490,8 +510,8 @@ function VirtualPageCanvas:_renderPageSlice(page_info, zoom, slice_top_px, slice
         h = native_h,
     }
 
-    local scaled_w = math.floor(layout.native_width * image_zoom + 0.5)
-    local scaled_h = math.floor(native_h * image_zoom + 0.5)
+    local scaled_w = math.floor(layout.native_width * image_zoom)
+    local scaled_h = math.floor(native_h * image_zoom)
 
 
     rect.scaled_rect = Geom:new{
@@ -555,10 +575,9 @@ function VirtualPageCanvas:paintScroll(target, x, y, retry)
     end
 
 
-    local gap_px = math.floor((self.page_gap_height or 0) * zoom + 0.5)
+    local gap_px = math.floor((self.page_gap_height or 0) * zoom)
     local prev_page
     for _, page_info in ipairs(visible_pages) do
-        -- Insert inter-page gap (scaled) before subsequent pages
         if prev_page and page_info.page_num ~= prev_page and gap_px > 0 then
             local remain_gap = viewport_h - stacked_y
             if remain_gap <= 0 then break end
@@ -566,30 +585,24 @@ function VirtualPageCanvas:paintScroll(target, x, y, retry)
             stacked_y = stacked_y + draw_gap
         end
 
-        -- Quantize visible slice to integer pixel rows in zoom space and clamp to remaining viewport height
         local remain = viewport_h - stacked_y
         if remain <= 0 then break end
         local visible_h = page_info.visible_bottom - page_info.visible_top
-        local slice_h_px = math.min(math.floor(visible_h + 0.5), remain)
+        local slice_h_px = math.min(math.floor(visible_h), remain)
         if slice_h_px <= 0 then goto continue end
-        local top_px = math.floor((page_info.visible_top - page_info.page_top) + 0.5)
+        local top_px = math.floor(page_info.visible_top - page_info.page_top)
 
         local layout = page_info.layout
-
-        -- Use the per-page zoom calculated by getVisiblePagesAtOffset
-        -- In fit-width mode, this will be per-page; otherwise it's the global zoom
         local page_zoom = page_info.zoom or zoom
 
-        -- Calculate rendered width
-        local scaled_w = math.floor((layout.rotated_width or layout.native_width) * page_zoom + 0.5)
+        local scaled_w = math.floor((layout.rotated_width or layout.native_width) * page_zoom)
 
         local horizontal_spacing = self.padding + (self.horizontal_margin or 0)
         local dest_x = x + horizontal_spacing + math.floor((viewport_w - scaled_w) / 2)
         local dest_y = y + stacked_y
 
-        -- Convert to native coordinates with rounding
-        local native_y = math.floor(top_px / page_zoom + 0.5)
-        local native_h = math.floor(slice_h_px / page_zoom + 0.5)
+        local native_y = math.floor(top_px / page_zoom)
+        local native_h = math.floor(slice_h_px / page_zoom)
 
         local rect = Geom:new{
             x = 0,
@@ -605,8 +618,7 @@ function VirtualPageCanvas:paintScroll(target, x, y, retry)
             logger.warn("VPC:paintScroll tiled slice render failed", "page", page_info.page_num)
         end
 
-        -- Calculate actual rendered height to ensure stacking aligns with rendered content
-        local actual_rendered_h = math.floor(native_h * page_zoom + 0.5)
+        local actual_rendered_h = math.floor(native_h * page_zoom)
 
         stacked_y = stacked_y + actual_rendered_h
         prev_page = page_info.page_num
