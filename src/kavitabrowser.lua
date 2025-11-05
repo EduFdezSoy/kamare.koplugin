@@ -178,9 +178,28 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
 
     -- Set up getBookInfo as a function (not method) that CoverBrowser can call
     -- CoverBrowser calls menu.getBookInfo(filepath), not menu:getBookInfo(filepath)
-    -- We delegate to BookInfoManager which will trigger the BookInfoManagerHook
+    -- CoverBrowser expects this to ALWAYS return a table, never nil
     self.getBookInfo = function(filepath)
-        return self.BookInfoManager:getBookInfo(filepath)
+        -- For Kavita virtual paths, we don't have real DocSettings/sidecar files
+        -- Return a minimal structure that CoverBrowser expects
+        if filepath and filepath:match("^/kavita/") then
+            return {
+                been_opened = false,  -- Kavita tracks this separately via API
+                pages = nil,
+                percent_finished = nil,
+                status = nil,
+                has_annotations = false,
+            }
+        end
+
+        -- For regular files, delegate to BookInfoManager
+        local bookinfo = self.BookInfoManager:getBookInfo(filepath)
+        if bookinfo then
+            return bookinfo
+        end
+
+        -- Fallback: always return a valid table (never nil!)
+        return { been_opened = false }
     end
 
     -- Mark as CoverBrowser-enhanced
