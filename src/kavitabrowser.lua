@@ -180,20 +180,67 @@ function KavitaBrowser:_applyCoverBrowserEnhancements()
     -- CoverBrowser calls menu.getBookInfo(filepath), not menu:getBookInfo(filepath)
     -- CoverBrowser expects this to ALWAYS return a table, never nil
     self.getBookInfo = function(filepath)
-        -- For Kavita virtual paths, we don't have real DocSettings/sidecar files
-        -- Return a minimal structure that CoverBrowser expects
+        -- Start with BookInfoManager data (static metadata like title, authors, pages)
+        local bookinfo = self.BookInfoManager:getBookInfo(filepath)
+
+        -- For Kavita virtual paths, enhance with live progress from item_table
         if filepath and filepath:match("^/kavita/") then
-            return {
-                been_opened = false,  -- Kavita tracks this separately via API
-                pages = nil,
-                percent_finished = nil,
-                status = nil,
-                has_annotations = false,
-            }
+            -- Find the matching item in item_table
+            local kavita_item = nil
+            if self.item_table then
+                for _, item in ipairs(self.item_table) do
+                    if item.file == filepath then
+                        kavita_item = item
+                        break
+                    end
+                end
+            end
+
+            -- Extract progress from Kavita DTO (series, volume, or chapter)
+            local pagesRead, pages = nil, nil
+            if kavita_item then
+                -- Check for series first (for stream lists like On Deck, Recently Updated, etc.)
+                if kavita_item.series then
+                    pagesRead = kavita_item.series.pagesRead or kavita_item.series.pageRead
+                    pages = kavita_item.series.pages
+                elseif kavita_item.volume then
+                    pagesRead = kavita_item.volume.pagesRead or kavita_item.volume.pageRead
+                    pages = kavita_item.volume.pages
+                elseif kavita_item.chapter then
+                    pagesRead = kavita_item.chapter.pagesRead or kavita_item.chapter.pageRead
+                    pages = kavita_item.chapter.pages
+                end
+            end
+
+            -- Fallback: use bookinfo pages if DTO doesn't have it
+            if not pages and bookinfo and bookinfo.pages then
+                pages = bookinfo.pages
+            end
+
+            -- Calculate percent_finished
+            local percent_finished = nil
+            if pagesRead and pages and pages > 0 then
+                percent_finished = pagesRead / pages
+            end
+
+            -- Determine status
+            local status = nil
+            if pagesRead and pages and pagesRead >= pages then
+                status = "complete"
+            end
+
+            -- Build the complete book_info structure
+            local result = bookinfo or {}
+            result.been_opened = (pagesRead and pagesRead > 0) or false
+            result.pages = pages  -- Use calculated pages (DTO or BookInfoManager)
+            result.percent_finished = percent_finished
+            result.status = status
+            result.has_annotations = false
+
+            return result
         end
 
-        -- For regular files, delegate to BookInfoManager
-        local bookinfo = self.BookInfoManager:getBookInfo(filepath)
+        -- For regular files, return BookInfoManager data
         if bookinfo then
             return bookinfo
         end
@@ -393,12 +440,13 @@ function KavitaBrowser:performKavitaSearch(query)
 
     local items = self:buildKavitaSeriesItems(normalized or {})
     self.catalog_title = _("Search results")
+    self.catalog_author = string.format("%s", query)
     self.search_url = nil
 
     if not items or #items == 0 then
         UIManager:show(InfoMessage:new{ text = _("No results") })
     end
-    self:switchItemTable(self.catalog_title, items, nil, nil, nil)
+    self:switchItemTable(self.catalog_title, items, nil, nil, self.catalog_author)
     self:setTitleBarLeftIcon("appbar.menu")
     self.onLeftButtonTap = function()
         self:showTitleMenu()

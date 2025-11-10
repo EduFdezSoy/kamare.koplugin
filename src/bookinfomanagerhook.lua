@@ -137,12 +137,22 @@ local function fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
     elseif item_type == "volume" and found_item.volume then
         local v = found_item.volume
         metadata.pages = v.pages or 0
-        metadata.authors = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or ""
+        -- Only show series name in mixed lists (streams), not in series detail view
+        if not browser.current_series_id then
+            metadata.authors = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or ""
+        else
+            metadata.authors = ""
+        end
 
     elseif item_type == "chapter" and found_item.chapter then
         local c = found_item.chapter
         metadata.pages = c.pages or 0
-        metadata.authors = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or ""
+        -- Only show series name in mixed lists (streams), not in series detail view
+        if not browser.current_series_id then
+            metadata.authors = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or ""
+        else
+            metadata.authors = ""
+        end
     end
 
     logger.dbg("Kamare: Fetched metadata:", metadata.title, "pages:", metadata.pages)
