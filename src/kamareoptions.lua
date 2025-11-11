@@ -7,14 +7,27 @@ local KamareOptions = {
         icon = "appbar.pageview",
         options = {
             {
-                name = "scroll_mode",
+                name = "view_mode",
                 name_text = _("View Mode"),
-                toggle = {_("page"), _("continuous")},
+                toggle = {_("page"), _("continuous"), _("dual page")},
+                values = {0, 1, 2},
+                default_value = 0,
+                event = "SetViewMode",
+                args = {0, 1, 2},
+                help_text = _([[- 'page' shows one page at a time- 'continuous' allows scrolling through pages- 'dual page' shows two pages side-by-side]]),
+            },
+            {
+                name = "page_direction",
+                name_text = _("Page Direction"),
+                toggle = {_("LTR"), _("RTL")},
                 values = {0, 1},
                 default_value = 0,
-                event = "SetScrollMode",
+                event = "SetPageDirection",
                 args = {0, 1},
-                help_text = _([[- 'page' mode shows only one page of the document at a time.- 'scroll' mode allows you to scroll the pages like you would in a web browser.]]),
+                enabled_func = function(configurable)
+                    return optionsutil.enableIfEquals(configurable, "view_mode", 2)
+                end,
+                help_text = _([[Set page reading direction for dual page mode. LTR (Left-to-Right) for comics/webtoons, RTL (Right-to-Left) for manga.]]),
             },
             {
                 name = "page_gap_height",
@@ -26,7 +39,7 @@ local KamareOptions = {
                 event = "PageGapUpdate",
                 args = {0, 2, 4, 8, 16, 32, 64},
                 enabled_func = function (configurable)
-                    return optionsutil.enableIfEquals(configurable, "scroll_mode", 1)
+                    return optionsutil.enableIfEquals(configurable, "view_mode", 1)
                 end,
                 name_text_hold_callback = optionsutil.showValues,
                 name_text_unit = true,
@@ -48,7 +61,7 @@ local KamareOptions = {
                 event = "ScrollDistanceUpdate",
                 args = {25, 50, 75, 100},
                 enabled_func = function (configurable)
-                    return optionsutil.enableIfEquals(configurable, "scroll_mode", 1)
+                    return optionsutil.enableIfEquals(configurable, "view_mode", 1)
                 end,
                 name_text_hold_callback = optionsutil.showValues,
                 name_text_unit = true,
@@ -69,16 +82,6 @@ local KamareOptions = {
                 default_value = 1,
                 event = "SetBackgroundColor",
                 help_text = _([[Choose the background color for the image viewer.]]),
-            },
-            {
-                name = "rotation_lock",
-                name_text = _("Rotation Lock"),
-                toggle = {_("Auto"), _("Locked")},
-                values = {false, true},
-                default_value = false,
-                event = "SetRotationLock",
-                args = {false, true},
-                help_text = _([[Auto rotation adjusts screen orientation automatically. Locked keeps the current system rotation fixed.]]),
             }
         }
     },
@@ -95,7 +98,8 @@ local KamareOptions = {
                 args = {0,1,2},
                 help_text = _([[Set how the page should be resized to fit the screen. In continuous mode, only 'width' is available for consistent page alignment.]]),
                 enabled_func = function(configurable)
-                    return optionsutil.enableIfEquals(configurable, "scroll_mode", 0)
+                    local mode = configurable.view_mode or 0
+                    return mode == 0 or mode == 2
                 end,
             },
             {
@@ -108,7 +112,7 @@ local KamareOptions = {
                 event = "ScrollMarginUpdate",
                 args = {0, 10, 20, 30, 40, 60, 80, 100},
                 enabled_func = function (configurable)
-                    return optionsutil.enableIfEquals(configurable, "scroll_mode", 1)
+                    return optionsutil.enableIfEquals(configurable, "view_mode", 1)
                 end,
                 name_text_hold_callback = optionsutil.showValues,
                 name_text_unit = true,
@@ -163,6 +167,16 @@ local KamareOptions = {
                 event = "SetRenderQuality",
                 args = {0.8, 1.2, -1},
                 help_text = _([[Controls internal rendering resolution. Low/High cap rendering based on screen size to save memory on large images. Native always uses full image resolution. Images smaller than threshold are never upscaled.]]),
+            },
+            {
+                name = "rotation_lock",
+                name_text = _("Screen Rotation"),
+                toggle = {_("Auto"), _("Locked")},
+                values = {false, true},
+                default_value = false,
+                event = "SetRotationLock",
+                args = {false, true},
+                help_text = _([[Auto rotation adjusts screen orientation automatically. Locked keeps the current system rotation fixed.]]),
             },
             {
                 name = "footer_mode",

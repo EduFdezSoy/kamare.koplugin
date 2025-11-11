@@ -27,6 +27,8 @@ local VIDCache = require("virtualimagedocumentcache")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+local TILE_SIZE_PX = 1024
+
 local KamareImageViewer = InputContainer:extend{
     images_list_data = nil,
     images_list_nb = nil,
@@ -46,10 +48,11 @@ local KamareImageViewer = InputContainer:extend{
     configurable = Configurable:new(),
     options = KamareOptions,
     prefetch_pages = 1,
-    page_gap_height = 8,
+    page_gap_height = 5,
 
     virtual_document = nil,
-    scroll_mode = true,
+    view_mode = 0, -- 0: page, 1: continuous, 2: dual
+    page_direction = 0, -- 0: LTR, 1: RTL
     scroll_offset = 0,
     current_zoom = 1.0,
     zoom_mode = 0, -- "full"
@@ -130,9 +133,10 @@ function KamareImageViewer:init()
         self.main_frame,
     }
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         self._pending_scroll_page = self._images_list_cur
     end
+
     if self.virtual_document and self._images_list_nb > 1 then
         self.footer = KamareFooter:new{
             settings = self.footer_settings,
@@ -198,7 +202,8 @@ function KamareImageViewer:_initCanvas()
         padding = self.page_padding,
         horizontal_margin = self.scroll_margin,
         background = bg_color,
-        scroll_mode = self.scroll_mode,
+        view_mode = self.view_mode,
+        page_direction = self.page_direction,
         page_gap_height = self.page_gap_height,
     }
 
@@ -373,11 +378,10 @@ function KamareImageViewer:loadSettings()
         return
     end
 
-    local settings = self.kamare_settings
-
     self.configurable.footer_mode = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
-    self.configurable.scroll_mode = self.scroll_mode and 1 or 0
+    self.configurable.view_mode = self.view_mode
+    self.configurable.page_direction = self.page_direction
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.scroll_distance = self.scroll_distance
@@ -387,11 +391,13 @@ function KamareImageViewer:loadSettings()
     self.configurable.background_color = self.background_color
     self.configurable.rotation_lock = false
 
-    self.configurable:loadSettings(settings, self.options.prefix .. "_")
+    -- Load saved settings (will override defaults if saved values exist)
+    self.configurable:loadSettings(self.kamare_settings, self.options.prefix .. "_")
 
     self.footer_settings.mode = self.configurable.footer_mode
     self.prefetch_pages = self.configurable.prefetch_pages or 1
-    self.scroll_mode = (self.configurable.scroll_mode == 1)
+    self.view_mode = self.configurable.view_mode or 0
+    self.page_direction = self.configurable.page_direction or 0
     self.zoom_mode = self.configurable.zoom_mode_type or 0
     self.page_gap_height = self.configurable.page_gap_height or 8
     self.scroll_distance = self.configurable.scroll_distance or 25
@@ -401,24 +407,19 @@ function KamareImageViewer:loadSettings()
     self.background_color = self.configurable.background_color or 1
     self.rotation_locked = self.configurable.rotation_lock or false
 
-    self.configurable.footer_mode = self.footer_settings.mode
-    self.configurable.prefetch_pages = self.prefetch_pages
-    self.configurable.scroll_mode = self.scroll_mode and 1 or 0
-    self.configurable.zoom_mode_type = self.zoom_mode
-    self.configurable.page_gap_height = self.page_gap_height
-    self.configurable.scroll_distance = self.scroll_distance
-    self.configurable.scroll_margin = self.scroll_margin
-    self.configurable.page_padding = self.page_padding
-    self.configurable.background_color = self.background_color
-    self.configurable.rotation_lock = self.rotation_locked
-
     self:syncAndSaveSettings()
 end
 
 function KamareImageViewer:syncAndSaveSettings()
+    if not self.kamare_settings then
+        logger.warn("KIV:syncAndSaveSettings: no settings object")
+        return
+    end
+
     self.configurable.footer_mode = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
-    self.configurable.scroll_mode = self.scroll_mode and 1 or 0
+    self.configurable.view_mode = self.view_mode
+    self.configurable.page_direction = self.page_direction
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.scroll_distance = self.scroll_distance
@@ -427,26 +428,6 @@ function KamareImageViewer:syncAndSaveSettings()
     self.configurable.render_quality = self.render_quality
     self.configurable.background_color = self.background_color
     self.configurable.rotation_lock = self.rotation_locked
-
-    self:saveSettings()
-end
-
-function KamareImageViewer:saveSettings()
-    if not self.kamare_settings then
-        logger.warn("KIV:saveSettings: no settings object")
-        return
-    end
-
-    self.configurable.footer_mode = self.configurable.footer_mode or self.footer_settings.mode
-    self.configurable.prefetch_pages = self.configurable.prefetch_pages or self.prefetch_pages
-    self.configurable.scroll_mode = self.configurable.scroll_mode ~= nil and self.configurable.scroll_mode or (self.scroll_mode and 1 or 0)
-    self.configurable.zoom_mode_type = self.configurable.zoom_mode_type or self.zoom_mode
-    self.configurable.page_gap_height = self.configurable.page_gap_height or self.page_gap_height
-    self.configurable.scroll_distance = self.configurable.scroll_distance or self.scroll_distance
-    self.configurable.scroll_margin = self.configurable.scroll_margin or self.scroll_margin
-    self.configurable.page_padding = self.configurable.page_padding or self.page_padding
-    self.configurable.background_color = self.configurable.background_color or self.background_color
-    self.configurable.rotation_lock = self.configurable.rotation_lock or false
 
     self.configurable:saveSettings(self.kamare_settings, self.options.prefix .. "_")
 end
@@ -566,7 +547,8 @@ end
 function KamareImageViewer:getFooterState()
     -- Calculate scroll progress if in scroll mode
     local scroll_progress = 0
-    if self.scroll_mode and self.canvas and self.virtual_document then
+
+    if self.view_mode == 1 and self.canvas and self.virtual_document then
         local zoom = self:getCurrentZoom()
         local viewport_w, viewport_h = self.canvas:getViewportSize()
         local total = self.virtual_document:getVirtualHeight(zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
@@ -585,7 +567,7 @@ function KamareImageViewer:getFooterState()
         current_page = self._images_list_cur,
         total_pages = self._images_list_nb,
         has_document = self.virtual_document ~= nil,
-        is_scroll_mode = self.scroll_mode or false,
+        is_scroll_mode = (self.view_mode == 1) or false,
         scroll_progress = scroll_progress,
         time_estimate = time_estimate,
     }
@@ -726,7 +708,10 @@ function KamareImageViewer:onTapMinibar()
 end
 
 function KamareImageViewer:onTapForward()
-    if BD.mirroredUILayout() then
+    -- In dual-page RTL mode, forward (right side) goes to previous page
+    local is_rtl = BD.mirroredUILayout() or (self.view_mode == 2 and self.page_direction == 1)
+
+    if is_rtl then
         self:onShowPrevImage()
     else
         self:onShowNextImage()
@@ -735,7 +720,10 @@ function KamareImageViewer:onTapForward()
 end
 
 function KamareImageViewer:onTapBackward()
-    if BD.mirroredUILayout() then
+    -- In dual-page RTL mode, backward (left side) goes to next page
+    local is_rtl = BD.mirroredUILayout() or (self.view_mode == 2 and self.page_direction == 1)
+
+    if is_rtl then
         self:onShowNextImage()
     else
         self:onShowPrevImage()
@@ -746,7 +734,8 @@ end
 function KamareImageViewer:onShowConfigMenu()
     self.configurable.footer_mode  = self.footer_settings.mode
     self.configurable.prefetch_pages = self.prefetch_pages
-    self.configurable.scroll_mode  = self.scroll_mode and 1 or 0
+    self.configurable.view_mode  = self.view_mode
+    self.configurable.page_direction = self.page_direction
     self.configurable.zoom_mode_type = self.zoom_mode
     self.configurable.page_gap_height = self.page_gap_height
     self.configurable.scroll_distance = self.scroll_distance
@@ -778,16 +767,31 @@ function KamareImageViewer:onConfigCloseCallback()
         self:setFooterMode(footer_mode)
     end
 
-    if self.configurable.scroll_mode ~= nil then
-        local new_scroll = tonumber(self.configurable.scroll_mode) == 1
-        if new_scroll ~= self.scroll_mode then
-            self.scroll_mode = new_scroll
+    if self.configurable.view_mode ~= nil then
+        local new_mode = tonumber(self.configurable.view_mode)
+        if new_mode ~= self.view_mode then
+            self.view_mode = new_mode
             self._pending_scroll_page = self._images_list_cur
-            if not self.scroll_mode then
+            if self.view_mode ~= 1 then
                 self.scroll_offset = 0
                 if self.canvas and self.zoom_mode == 0 then
                     self.canvas:setCenter(0.5, 0.5)
                 end
+            end
+            if self.canvas then
+                self.canvas:setViewMode(new_mode)
+            end
+            self:update()
+            UIManager:setDirty(self, "ui", self.main_frame.dimen)
+        end
+    end
+
+    if self.configurable.page_direction ~= nil then
+        local new_direction = tonumber(self.configurable.page_direction)
+        if new_direction ~= self.page_direction then
+            self.page_direction = new_direction
+            if self.canvas then
+                self.canvas:setPageDirection(new_direction)
             end
             self:update()
             UIManager:setDirty(self, "ui", self.main_frame.dimen)
@@ -880,17 +884,16 @@ function KamareImageViewer:onSetRenderQuality(quality)
     return true
 end
 
-function KamareImageViewer:onSetScrollMode(value)
-    local n = tonumber(value)
-    local new_scroll = (n == 1)
+function KamareImageViewer:onSetViewMode(value)
+    local mode = tonumber(value) or 0
+    if mode == self.view_mode then return true end
 
-    if new_scroll == self.scroll_mode then return true end
-
-    self.scroll_mode = new_scroll
-    self.configurable.scroll_mode = self.scroll_mode and 1 or 0
+    self.view_mode = mode
+    self.configurable.view_mode = mode
     self._pending_scroll_page = self._images_list_cur
 
-    if self.scroll_mode then
+    -- Continuous mode requires width-fit zoom
+    if mode == 1 then
         if self.zoom_mode ~= 1 then
             self.zoom_mode = 1
             self.configurable.zoom_mode_type = 1
@@ -900,7 +903,7 @@ function KamareImageViewer:onSetScrollMode(value)
         end
     else
         self.scroll_offset = 0
-        if self.zoom_mode == 1 then
+        if mode == 0 and self.zoom_mode == 1 then
             self.zoom_mode = 0
             self.configurable.zoom_mode_type = 0
             if self.canvas then
@@ -910,6 +913,28 @@ function KamareImageViewer:onSetScrollMode(value)
         if self.canvas and self.zoom_mode == 0 then
             self.canvas:setCenter(0.5, 0.5)
         end
+    end
+
+    if self.canvas then
+        self.canvas:setViewMode(mode)
+    end
+
+    self:syncAndSaveSettings()
+    self:update()
+    UIManager:setDirty(self, "ui", self.main_frame.dimen)
+
+    return true
+end
+
+function KamareImageViewer:onSetPageDirection(value)
+    local direction = tonumber(value) or 0
+    if direction == self.page_direction then return true end
+
+    self.page_direction = direction
+    self.configurable.page_direction = direction
+
+    if self.canvas then
+        self.canvas:setPageDirection(direction)
     end
 
     self:syncAndSaveSettings()
@@ -937,7 +962,7 @@ function KamareImageViewer:onPageGapUpdate(value)
         self.canvas:setPageGapHeight(gap)
     end
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         self._pending_scroll_page = self._images_list_cur
         self:update()
         UIManager:nextTick(function() self:prefetchUpcomingTiles() end)
@@ -973,7 +998,7 @@ function KamareImageViewer:onScrollMarginUpdate(value)
         self.canvas:setHorizontalMargin(margin)
     end
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         self._pending_scroll_page = self._images_list_cur
         self:update()
         UIManager:nextTick(function() self:prefetchUpcomingTiles() end)
@@ -1031,8 +1056,10 @@ function KamareImageViewer:_clampScrollOffset(offset)
 end
 
 function KamareImageViewer:_setScrollOffset(offset, opts)
-    if not self.scroll_mode then return end
+    if self.view_mode ~= 1 then return end
+
     local clamped = self:_clampScrollOffset(offset)
+
     if math.abs(clamped - (self.scroll_offset or 0)) > 0.5 then
         self.scroll_offset = clamped
         if self.canvas then
@@ -1095,23 +1122,27 @@ function KamareImageViewer:_scrollStep(direction)
 end
 
 function KamareImageViewer:_scrollToPage(page)
-    if not self.scroll_mode or not self.virtual_document then return end
+    if self.view_mode ~= 1 or not self.virtual_document then return end
+
     local zoom = self:getCurrentZoom()
     local viewport_w = self.canvas and select(1, self.canvas:getViewportSize()) or 0
     local offset = self.virtual_document:getScrollPositionForPage(page, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
+
     self:_setScrollOffset(offset, { silent = true })
     self:_updatePageFromScroll(true)
     self:updateFooter()
 end
 
 function KamareImageViewer:_updatePageFromScroll(silent)
-    if not self.scroll_mode or not self.virtual_document then return end
+    if self.view_mode ~= 1 or not self.virtual_document then return end
+
     local zoom = self:getCurrentZoom()
     local viewport_w, viewport_h = self.canvas and self.canvas:getViewportSize() or 0, 0
     local check_offset = (self.scroll_offset or 0) + viewport_h
     local new_page = self.virtual_document:getPageAtOffset(check_offset, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
 
     local should_prefetch = false
+
     if self._images_list_cur < self._images_list_nb then
         local current_page_start = self.virtual_document:getScrollPositionForPage(self._images_list_cur, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
         local next_page_start = self.virtual_document:getScrollPositionForPage(self._images_list_cur + 1, zoom, self:_getRotationAngle(), self.zoom_mode, viewport_w)
@@ -1164,7 +1195,6 @@ function KamareImageViewer:_updateCanvasState()
     local page = Math.clamp(self._images_list_cur or 1, 1, self._images_list_nb or 1)
     local rotation = self:_getRotationAngle()
 
-    self.canvas:setMode(self.scroll_mode and "scroll" or "page")
     self.canvas:setRotation(rotation)
     self.canvas:setZoomMode(self.zoom_mode)
     self.canvas:setPage(page)
@@ -1193,7 +1223,7 @@ function KamareImageViewer:_updateCanvasState()
 
     self.current_zoom = self.canvas.zoom or 1.0
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         local desired = self.scroll_offset or 0
         if self._pending_scroll_page then
             local viewport_w = select(1, self.canvas:getViewportSize())
@@ -1224,11 +1254,14 @@ function KamareImageViewer:update()
     if self.title_bar_visible and self.title_bar then
         table.insert(self.frame_elements, self.title_bar)
     end
+
     local image_idx = #self.frame_elements + 1
+
     if self.footer and self.footer:isVisible() then
         self.footer:update(self:getFooterState())
         table.insert(self.frame_elements, self.footer:getWidget())
     end
+
     self.img_container_h = self.height - self.frame_elements:getSize().h
 
     if self.canvas_container then
@@ -1240,8 +1273,8 @@ function KamareImageViewer:update()
     if self.image_container then
         table.insert(self.frame_elements, image_idx, self.image_container)
     end
-    self.frame_elements:resetLayout()
 
+    self.frame_elements:resetLayout()
     self.main_frame.radius = not self.fullscreen and 8 or nil
 
     UIManager:setDirty(self, function()
@@ -1262,7 +1295,7 @@ function KamareImageViewer:calculateAdaptivePrefetch()
         return 1
     end
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         return 1
     end
 
@@ -1287,6 +1320,7 @@ function KamareImageViewer:calculateAdaptivePrefetch()
     end
 
     local avg_tile_size
+
     if count > 0 and total_size > 0 then
         avg_tile_size = total_size / count
     else
@@ -1297,23 +1331,28 @@ function KamareImageViewer:calculateAdaptivePrefetch()
 
     local tiles_per_page = 20
     local current_page = self._images_list_cur
+
     if current_page and self.virtual_document then
         local native_dims = self.virtual_document:getNativePageDimensions(current_page)
+
         if native_dims and native_dims.w > 0 and native_dims.h > 0 then
-            local tiles_x = math.ceil(native_dims.w / 1024)
-            local tiles_y = math.ceil(native_dims.h / 1024)
+            local tiles_x = math.ceil(native_dims.w / TILE_SIZE_PX)
+            local tiles_y = math.ceil(native_dims.h / TILE_SIZE_PX)
             tiles_per_page = tiles_x * tiles_y
         end
     end
 
     local prefetch_pages
+
     if utilization < 0.5 then
         local remaining_tiles = tiles_capacity * (1.0 - utilization)
         local max_pages_by_space = math.floor(remaining_tiles / tiles_per_page)
+
         prefetch_pages = math.min(3, math.max(1, max_pages_by_space))
     elseif utilization < 0.8 then
         local remaining_tiles = tiles_capacity * (1.0 - utilization)
         local max_pages_by_space = math.floor(remaining_tiles / tiles_per_page)
+
         prefetch_pages = math.min(2, math.max(1, max_pages_by_space))
     else
         prefetch_pages = 1
@@ -1326,6 +1365,7 @@ function KamareImageViewer:prefetchUpcomingTiles()
     if not self.virtual_document then return end
 
     local target_buffer_size
+
     if self.prefetch_pages == -1 then
         target_buffer_size = self:calculateAdaptivePrefetch()
     else
@@ -1339,7 +1379,7 @@ function KamareImageViewer:prefetchUpcomingTiles()
 
     local current_page = self._images_list_cur
 
-    if self.scroll_mode and self.canvas then
+    if self.view_mode == 1 and self.canvas then
         local viewport_w, viewport_h = self.canvas:getViewportSize()
         local visible = self.virtual_document:getVisiblePagesAtOffset(self.scroll_offset or 0, viewport_h, zoom, rotation, self.zoom_mode, viewport_w) or {}
         if #visible > 0 then
@@ -1359,7 +1399,7 @@ function KamareImageViewer:prefetchUpcomingTiles()
         local native_dims = self.virtual_document:getNativePageDimensions(check_page)
 
         if native_dims and native_dims.w > 0 and native_dims.h > 0 then
-            local first_tile_rect = Geom:new{ x = 0, y = 0, w = 1024, h = 1024 }
+            local first_tile_rect = Geom:new{ x = 0, y = 0, w = TILE_SIZE_PX, h = TILE_SIZE_PX }
             local hash = self.virtual_document:_tileHash(check_page, zoom, rotation, self.virtual_document.gamma, first_tile_rect)
             local cached = VIDCache:getNativeTile(hash)
             page_cached = (cached ~= nil)
@@ -1381,7 +1421,7 @@ function KamareImageViewer:prefetchUpcomingTiles()
     for _, page in ipairs(pages_to_prefetch) do
         UIManager:nextTick(function()
             pcall(function()
-                local page_mode = not self.scroll_mode
+                local page_mode = (self.view_mode ~= 1)
                 self.virtual_document:prefetchPage(page, zoom, rotation, page_mode)
             end)
         end)
@@ -1393,26 +1433,29 @@ function KamareImageViewer:onSwipe(_, ges)
     local dist = ges.distance
 
     if dir == "north" then
-        if self.scroll_mode then
+        if self.view_mode == 1 then
             self:_scrollBy(dist)
         end
     elseif dir == "south" then
-        if self.scroll_mode then
+        if self.view_mode == 1 then
             self:_scrollBy(-dist)
         end
     end
+
     return true
 end
 
 function KamareImageViewer:_canPanInPageMode(direction)
-    if self.scroll_mode then return false end
+    if self.view_mode == 1 then return false end
     if not (self.canvas and self.virtual_document) then return false end
 
     local viewport_w, viewport_h = self.canvas:getViewportSize()
+
     if viewport_w <= 0 or viewport_h <= 0 then return false end
 
     local page = Math.clamp(self._images_list_cur or 1, 1, self._images_list_nb or 1)
     local dims = self.virtual_document:getNativePageDimensions(page)
+
     if not dims or dims.w <= 0 or dims.h <= 0 then return false end
 
     local zoom = self:getCurrentZoom()
@@ -1420,6 +1463,7 @@ function KamareImageViewer:_canPanInPageMode(direction)
 
     local page_w = dims.w
     local page_h = dims.h
+
     if rotation % 180 ~= 0 then
         page_w, page_h = page_h, page_w
     end
@@ -1533,7 +1577,7 @@ function KamareImageViewer:switchToImageNum(page)
         self.ui.statistics:onPageUpdate(page)
     end
 
-    if self.scroll_mode then
+    if self.view_mode == 1 then
         self:_scrollToPage(page)
     else
         self.scroll_offset = 0
@@ -1583,52 +1627,84 @@ function KamareImageViewer:switchToImageNum(page)
 end
 
 function KamareImageViewer:onShowNextImage()
-    if self.scroll_mode and self:_scrollStep(1) then
+    -- In RTL dual-page mode in landscape, "next" in reading direction means going backward in page numbers
+    local is_landscape = Screen:getWidth() > Screen:getHeight()
+    local is_rtl = self.view_mode == 2 and self.page_direction == 1 and is_landscape
+
+    if is_rtl then
+        return self:_showPrevImageInternal()
+    else
+        return self:_showNextImageInternal()
+    end
+end
+
+function KamareImageViewer:onShowPrevImage()
+    -- In RTL dual-page mode in landscape, "prev" in reading direction means going forward in page numbers
+    local is_landscape = Screen:getWidth() > Screen:getHeight()
+    local is_rtl = self.view_mode == 2 and self.page_direction == 1 and is_landscape
+
+    if is_rtl then
+        return self:_showNextImageInternal()
+    else
+        return self:_showPrevImageInternal()
+    end
+end
+
+function KamareImageViewer:_showNextImageInternal()
+    if self.view_mode == 1 and self:_scrollStep(1) then
         return
     end
 
-    if not self.scroll_mode and self:_canPanInPageMode(1) then
+    if self.view_mode ~= 1 and self:_canPanInPageMode(1) then
         if self:_panWithinPage(1) then
             return
         end
     end
 
+    -- In dual-page mode, advance by 2 pages (or 1 for landscape)
+    local step = (self.view_mode == 2) and self:_getDualPageStep(self._images_list_cur, 1) or 1
+
     if self._images_list_cur < self._images_list_nb then
-        self:switchToImageNum(self._images_list_cur + 1)
+        self:switchToImageNum(self._images_list_cur + step)
     else
         self:_checkAndOfferNextChapter()
     end
 end
 
-function KamareImageViewer:onShowPrevImage()
-    if self.scroll_mode and self:_scrollStep(-1) then
+function KamareImageViewer:_showPrevImageInternal()
+    if self.view_mode == 1 and self:_scrollStep(-1) then
         return
     end
 
-    if not self.scroll_mode and self:_canPanInPageMode(-1) then
+    if self.view_mode ~= 1 and self:_canPanInPageMode(-1) then
         if self:_panWithinPage(-1) then
             return
         end
     end
 
+    -- In dual-page mode, go back by 2 pages (or 1 for landscape)
+    local step = (self.view_mode == 2) and self:_getDualPageStep(self._images_list_cur, -1) or 1
+
     if self._images_list_cur > 1 then
-        self:switchToImageNum(self._images_list_cur - 1)
+        self:switchToImageNum(self._images_list_cur - step)
     end
 end
 
 function KamareImageViewer:onShowNextSlice()
-    if not self.scroll_mode then
+    if self.view_mode ~= 1 then
         self:onShowNextImage()
         return
     end
+
     self:_scrollStep(1)
 end
 
 function KamareImageViewer:onShowPrevSlice()
-    if not self.scroll_mode then
+    if self.view_mode ~= 1 then
         self:onShowPrevImage()
         return
     end
+
     self:_scrollStep(-1)
 end
 
@@ -1650,7 +1726,7 @@ function KamareImageViewer:_checkAndOfferNextChapter()
     logger.info("KamareImageViewer: Querying next chapter for series", seriesId, "volume", volumeId, "chapter", currentChapterId)
 
     UIManager:nextTick(function()
-        local nextChapterId, code, headers, status, body = KavitaClient:getNextChapter(seriesId, volumeId, currentChapterId)
+        local nextChapterId, code, _, _, _ = KavitaClient:getNextChapter(seriesId, volumeId, currentChapterId)
 
         if nextChapterId == -1 or not nextChapterId or type(code) ~= "number" or code < 200 or code >= 300 then
             self.next_chapter_dialog = ButtonDialog:new{
@@ -1815,6 +1891,33 @@ function KamareImageViewer:_getRotationAngle()
     return self.rotated and 90 or 0
 end
 
+function KamareImageViewer:_getDualPageStep(current_page, direction)
+    -- Returns step size for dual-page navigation (1 or 2)
+    -- direction: 1 for forward, -1 for backward
+    if self.view_mode ~= 2 or not self.virtual_document then
+        return 1
+    end
+
+    -- Current page is landscape: step by 1
+    if self.virtual_document:getPageOrientation(current_page) == 1 then
+        return 1
+    end
+
+    -- Check next/previous page
+    local check_page = current_page + direction
+    if check_page < 1 or check_page > self._images_list_nb then
+        return 1
+    end
+
+    -- Next/prev page is landscape: step by 1
+    if self.virtual_document:getPageOrientation(check_page) == 1 then
+        return 1
+    end
+
+    -- Both portrait: normal dual-page step of 2
+    return 2
+end
+
 function KamareImageViewer:toggleTitleBar()
     self.title_bar_visible = not self.title_bar_visible
     self:update()
@@ -1888,6 +1991,9 @@ function KamareImageViewer:handleRotation(mode, old_mode)
         if self.canvas then
             self.canvas._layout_dirty = true
         end
+
+        -- Re-initialize gesture listeners after dimensions are updated
+        self:initConfigGesListener()
 
         self:update()
     end

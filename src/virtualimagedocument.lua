@@ -11,6 +11,7 @@ local Screen = Device.screen
 
 local DEFAULT_PAGE_WIDTH = 800
 local DEFAULT_PAGE_HEIGHT = 1200
+local TILE_SIZE_PX = 1024
 
 local VirtualImageDocument = Document:extend{
     provider = "virtualimagedocument",
@@ -38,7 +39,7 @@ local VirtualImageDocument = Document:extend{
     _virtual_layout_cache = nil,
     _virtual_layout_dirty = true,
 
-    tile_px = 1024, -- default tile size in page coords (px)
+    tile_px = TILE_SIZE_PX, -- default tile size in page coords (px)
 }
 
 local function isPositiveDimension(w, h)
@@ -160,7 +161,11 @@ function VirtualImageDocument:_storeDims(pageno, w, h)
             return
         end
     end
-    self._dims_cache[pageno] = Geom:new{ w = w, h = h }
+    self._dims_cache[pageno] = {
+        w = w,
+        h = h,
+        orientation = (w > h) and 1 or 0,  -- 0: portrait, 1: landscape
+    }
 end
 
 function VirtualImageDocument:_ensureVirtualLayout(rotation)
@@ -310,6 +315,12 @@ function VirtualImageDocument:getNativePageDimensions(pageno)
     end
 
     return Geom:new{ w = DEFAULT_PAGE_WIDTH, h = DEFAULT_PAGE_HEIGHT }
+end
+
+function VirtualImageDocument:getPageOrientation(pageno)
+    local cached = self._dims_cache and self._dims_cache[pageno]
+
+    return (cached and cached.orientation) or 0
 end
 
 function VirtualImageDocument:preloadDimensions(list)
@@ -521,7 +532,8 @@ function VirtualImageDocument:transformRect(native_rect, zoom, rotation)
 end
 
 function VirtualImageDocument:_computeTileRects(rect, tile_px)
-    tile_px = math.max(16, tonumber(tile_px or self.tile_px or 1024))
+    tile_px = math.max(16, tonumber(tile_px or self.tile_px or TILE_SIZE_PX))
+
     local rx, ry = rect.x or 0, rect.y or 0
     local rw, rh = rect.w or 0, rect.h or 0
 
@@ -581,7 +593,6 @@ function VirtualImageDocument:_tileHash(pageno, zoom, rotation, gamma, rect)
         tostring(self.render_mode or 0),
         color,
         quality_key,
-        -- Note: NO zoom in hash - tiles are cached at native resolution (but quality-scaled)
     }, "|")
 end
 
@@ -792,11 +803,13 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, rotation, tile_px
     if not native or native.w <= 0 or native.h <= 0 then return end
 
     local full_rect = Geom:new{ x = 0, y = 0, w = native.w, h = native.h }
-    local tp = math.max(16, tonumber(tile_px or self.tile_px or 1024))
+    local tp = math.max(16, tonumber(tile_px or self.tile_px or TILE_SIZE_PX))
     local tiles = self:_computeTileRects(full_rect, tp)
+
     if #tiles == 0 then return end
 
     local missing = {}
+
     for _, t in ipairs(tiles) do
         local key = self:_tileHash(pageno, zoom, rotation, self.gamma, t)
         local exists = VIDCache:getNativeTile(key)
@@ -866,9 +879,10 @@ function VirtualImageDocument:_preSplitPageTiles(pageno, zoom, rotation, tile_px
 end
 
 function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, rotation, tile_px, prefetch_rows, page_mode)
-    local tp = math.max(16, tonumber(tile_px or self.tile_px or 1024))
+    local tp = math.max(16, tonumber(tile_px or self.tile_px or TILE_SIZE_PX))
     local tiles = self:_computeTileRects(rect, tp)
     local any_missing = false
+
     for _, t in ipairs(tiles) do
         local key = self:_tileHash(pageno, zoom, rotation, self.gamma, t)
         if not VIDCache:getNativeTile(key) then
@@ -882,6 +896,7 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ro
     end
 
     local native = self:getNativePageDimensions(pageno)
+
     if not native or native.w <= 0 or native.h <= 0 then
         logger.warn("VID:drawPageTiled invalid page dimensions", "page", pageno)
         return false
@@ -903,10 +918,10 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ro
         h = clamped_h,
     }
 
-    local tp = math.max(16, tonumber(tile_px or self.tile_px or 1024))
     local rows = tonumber(prefetch_rows) or 0
 
     local prefetch_rect = base_rect
+
     if rows > 0 then
         local pad = rows * tp
         local y0 = math.max(0, base_rect.y - pad)
@@ -920,6 +935,7 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ro
     end
 
     local need_batch = false
+
     do
         local probe_tiles = self:_computeTileRects(prefetch_rect, tp)
         for _, t in ipairs(probe_tiles) do
@@ -931,9 +947,10 @@ function VirtualImageDocument:drawPageTiled(target, x, y, rect, pageno, zoom, ro
             end
         end
     end
+
     local batch_started = need_batch and self:_beginTileBatch(pageno) or false
 
-    local tiles = self:_computeTileRects(prefetch_rect, tp)
+    tiles = self:_computeTileRects(prefetch_rect, tp)
 
     if #tiles == 0 then return true end
 
