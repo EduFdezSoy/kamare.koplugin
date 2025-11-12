@@ -39,6 +39,9 @@ local VirtualImageDocument = Document:extend{
     _virtual_layout_cache = nil,
     _virtual_layout_dirty = true,
 
+    _dims_cache = nil,
+    _orientation_cache = nil,
+
     tile_px = TILE_SIZE_PX, -- default tile size in page coords (px)
 }
 
@@ -85,6 +88,7 @@ function VirtualImageDocument:init()
     self.images_list = self.images_list or {}
     self._pages = self.pages_override or #self.images_list
     self._dims_cache = {}
+    self._orientation_cache = {}
     if self.images_dimensions then
         self:preloadDimensions(self.images_dimensions)
     end
@@ -131,6 +135,7 @@ end
 function VirtualImageDocument:close()
     self.is_open = false
     self._dims_cache = nil
+    self._orientation_cache = nil
     self._virtual_layout_cache = nil
     self.virtual_layout = nil
     self.total_virtual_height = nil
@@ -147,6 +152,7 @@ end
 
 function VirtualImageDocument:_storeDims(pageno, w, h)
     self._dims_cache = self._dims_cache or {}
+    self._orientation_cache = self._orientation_cache or {}
     if not isPositiveDimension(w, h) then
         w, h = DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT
     end
@@ -161,11 +167,8 @@ function VirtualImageDocument:_storeDims(pageno, w, h)
             return
         end
     end
-    self._dims_cache[pageno] = {
-        w = w,
-        h = h,
-        orientation = (w > h) and 1 or 0,  -- 0: portrait, 1: landscape
-    }
+    self._dims_cache[pageno] = Geom:new{ w = w, h = h }
+    self._orientation_cache[pageno] = (w > h) and 1 or 0  -- 0: portrait, 1: landscape
 end
 
 function VirtualImageDocument:_ensureVirtualLayout(rotation)
@@ -318,9 +321,7 @@ function VirtualImageDocument:getNativePageDimensions(pageno)
 end
 
 function VirtualImageDocument:getPageOrientation(pageno)
-    local cached = self._dims_cache and self._dims_cache[pageno]
-
-    return (cached and cached.orientation) or 0
+    return (self._orientation_cache and self._orientation_cache[pageno]) or 0
 end
 
 function VirtualImageDocument:preloadDimensions(list)

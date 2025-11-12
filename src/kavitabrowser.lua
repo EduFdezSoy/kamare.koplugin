@@ -360,7 +360,7 @@ function KavitaBrowser:showDashboardAfterSelection(server_name)
     UIManager:show(loading)
     UIManager:forceRePaint()
 
-    local data, code, _, status, _ = KavitaClient:getDashboard()
+    local data, code, __, status = KavitaClient:getDashboard()
 
     UIManager:close(loading)
 
@@ -422,7 +422,7 @@ function KavitaBrowser:performKavitaSearch(query)
     UIManager:show(loading)
     UIManager:forceRePaint()
 
-    local result, code, _, status, _ = KavitaClient:getSearch(query, false)
+    local result, code, __, status = KavitaClient:getSearch(query, false)
 
     UIManager:close(loading)
 
@@ -600,7 +600,7 @@ function KavitaBrowser:showSeriesDetail(series_name, series_id, library_id, opts
     UIManager:show(loading)
     UIManager:forceRePaint()
 
-    local detail, code, _, status, _ = KavitaClient:getSeriesDetail(series_id)
+    local detail, code, __, status = KavitaClient:getSeriesDetail(series_id)
 
     UIManager:close(loading)
 
@@ -709,7 +709,7 @@ function KavitaBrowser:showKavitaStream(stream_name)
     local has_more = true
 
     while has_more do
-        local data, code, _, status, _ = KavitaClient:getStreamSeries(stream_name, { PageNumber = page_num, PageSize = page_size })
+        local data, code, __, status = KavitaClient:getStreamSeries(stream_name, { PageNumber = page_num, PageSize = page_size })
 
         if not data then
             UIManager:close(loading)
@@ -874,7 +874,7 @@ function KavitaBrowser:authenticateAfterSelection(server_name, server_url)
     end
 
     -- Authenticate and persist bearer token
-    local token, code, _, err = KavitaClient:authenticate(base_url, apiKey)
+    local token, code, __, err = KavitaClient:authenticate(base_url, apiKey)
     if not token then
         logger.warn("KavitaBrowser:authenticateAfterSelection: authentication failed", code, err)
         return
@@ -1438,7 +1438,7 @@ function KavitaBrowser:onMenuHold(item)
                         seriesId  = self.current_series_id,
                         libraryId = self.current_series_library_id,
                     }
-                    local code, _, _, _ = KavitaClient:postReaderProgress(progress)
+                    local code = KavitaClient:postReaderProgress(progress)
                     if code == 200 or code == 204 then
                         UIManager:show(InfoMessage:new{ text = _("Marked as read") })
                         -- Refresh the series view to update progress indicators
@@ -1572,7 +1572,7 @@ function KavitaBrowser:onMenuHold(item)
                         seriesId  = self.current_series_id,
                         libraryId = self.current_series_library_id,
                     }
-                    local code, _, _, _ = KavitaClient:postReaderProgress(progress)
+                    local code = KavitaClient:postReaderProgress(progress)
                     if code == 200 or code == 204 then
                         UIManager:show(InfoMessage:new{ text = _("Marked as read") })
                         -- Refresh the series view to update progress indicators

@@ -1726,7 +1726,7 @@ function KamareImageViewer:_checkAndOfferNextChapter()
     logger.info("KamareImageViewer: Querying next chapter for series", seriesId, "volume", volumeId, "chapter", currentChapterId)
 
     UIManager:nextTick(function()
-        local nextChapterId, code, _, _, _ = KavitaClient:getNextChapter(seriesId, volumeId, currentChapterId)
+        local nextChapterId, code = KavitaClient:getNextChapter(seriesId, volumeId, currentChapterId)
 
         if nextChapterId == -1 or not nextChapterId or type(code) ~= "number" or code < 200 or code >= 300 then
             self.next_chapter_dialog = ButtonDialog:new{
