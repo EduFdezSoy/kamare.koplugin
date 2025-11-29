@@ -1,4 +1,3 @@
-local BD = require("ui/bidi")
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
@@ -1010,7 +1009,7 @@ function KavitaBrowser:handleCatalogError(context, item_url, error_msg)
 end
 
 -- Launch the Kavita chapter viewer using Reader/image endpoint
-function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume)
+function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume, override_view_mode)
     if not chapter or not chapter.id then return end
 
     local pages = chapter.pages or (chapter.files and #chapter.files) or 0
@@ -1156,6 +1155,7 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         preloaded_iswide = preloaded_iswide,
         metadata = metadata,
         kamare_settings = self.kamare_settings,
+        override_view_mode = override_view_mode,
         on_close_callback = function(current_page, total_pages)
             local sid = self.current_series_id
             if not sid then return end
@@ -1170,20 +1170,20 @@ function KavitaBrowser:launchKavitaChapterViewer(chapter, series_name, is_volume
         on_next_chapter_callback = function(next_chapter_id)
             -- Fetch the next chapter details and launch viewer
             UIManager:nextTick(function()
-                local loading = InfoMessage:new{ text = _("Loading next chapter..."), timeout = 0 }
-                UIManager:show(loading)
+                local next_loading = InfoMessage:new{ text = _("Loading next chapter..."), timeout = 0 }
+                UIManager:show(next_loading)
                 UIManager:forceRePaint()
 
                 -- Get series detail to find the chapter
                 local sid = self.current_series_id
                 if not sid then
-                    UIManager:close(loading)
+                    UIManager:close(next_loading)
                     UIManager:show(InfoMessage:new{ text = _("Cannot load next chapter: missing series info") })
                     return
                 end
 
                 local detail, _ = KavitaClient:getSeriesDetail(sid)
-                UIManager:close(loading)
+                UIManager:close(next_loading)
 
                 if not detail then
                     UIManager:show(InfoMessage:new{ text = _("Failed to load next chapter") })
@@ -1391,6 +1391,25 @@ function KavitaBrowser:onMenuHold(item)
         local buttons = {
             {
                 {
+                    text = "\u{2194} " .. _("Page mode"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        -- Launch in page mode (view_mode=0), continue from last position
+                        self:launchKavitaChapterViewer(chapter, self.catalog_title or self.current_server_name, false, 0)
+                    end,
+                },
+                {
+                    text = "\u{2195} " .. _("Continuous"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        -- Launch in continuous mode (view_mode=1), continue from last position
+                        self:launchKavitaChapterViewer(chapter, self.catalog_title or self.current_server_name, false, 1)
+                    end,
+                },
+            },
+            {},  -- separator
+            {
+                {
                     text = "\u{23EE} " .. _("From start"),
                     callback = function()
                         UIManager:close(dialog)
@@ -1523,6 +1542,25 @@ function KavitaBrowser:onMenuHold(item)
 
         local dialog
         local buttons = {
+            {
+                {
+                    text = "\u{2194} " .. _("Page mode"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        -- Launch in page mode (view_mode=0), continue from last position
+                        self:launchKavitaChapterViewer(ch, self.catalog_title or self.current_server_name, true, 0)
+                    end,
+                },
+                {
+                    text = "\u{2195} " .. _("Continuous"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        -- Launch in continuous mode (view_mode=1), continue from last position
+                        self:launchKavitaChapterViewer(ch, self.catalog_title or self.current_server_name, true, 1)
+                    end,
+                },
+            },
+            {},  -- separator
             {
                 {
                     text = "\u{23EE} " .. _("From start"),

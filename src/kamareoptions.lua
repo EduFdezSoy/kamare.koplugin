@@ -150,13 +150,13 @@ local KamareOptions = {
         options = {
             {
                 name = "prefetch_pages",
-                name_text = _("Prefetch Pages"),
-                toggle = {_("Off"), _("1"), _("2"), _("3"), _("Auto")},
-                values = {0, 1, 2, 3, -1},
+                name_text = _("Prefetch"),
+                toggle = {_("Off"), _("On")},
+                values = {0, 1},
                 default_value = 1,
                 event = "SetPrefetchPages",
-                args = {0, 1, 2, 3, -1},
-                help_text = _([[Set how many pages to prefetch when reading. Auto dynamically adjusts (0-5 pages) based on available cache space and average page size.]]),
+                args = {0, 1},
+                help_text = _([[Enable or disable automatic page prefetching. When enabled, upcoming pages are loaded in the background for smooth navigation.]]),
             },
             {
                 name = "render_quality",
