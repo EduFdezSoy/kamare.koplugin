@@ -228,6 +228,10 @@ function KamareFooter:__initGenerators()
 end
 
 function KamareFooter:updateTextGenerator()
+    if not self.footerTextGeneratorMap then
+        self:__initGenerators()
+    end
+
     if not self.settings.enabled then
         self.genFooterText = self.footerTextGeneratorMap.empty
         return
