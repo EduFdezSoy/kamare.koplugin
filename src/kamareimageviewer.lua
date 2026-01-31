@@ -1278,7 +1278,18 @@ function KamareImageViewer:_updateCanvasState()
         self:updateFooter()
     else
         self.scroll_offset = 0
-        if self.zoom_mode == 0 then
+        if not self._initial_view_done and self.zoom_mode == 1 then
+            local _, viewport_h = self.canvas:getViewportSize()
+            local dims = self.virtual_document:getNativePageDimensions(page)
+            if dims then
+                if self.zoom_mode == 1 then
+                    local y = ((dims.h * self.current_zoom) > viewport_h) and
+                        (viewport_h / (2 * dims.h * self.current_zoom)) or 0.5
+                    self.canvas:setCenter(0.5, y)
+                end
+            end
+            self._initial_view_done = true
+        elseif self.zoom_mode == 0 then
             self.canvas:setCenter(0.5, 0.5)
         end
         self:updateFooter()
