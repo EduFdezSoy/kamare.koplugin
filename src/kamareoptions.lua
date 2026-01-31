@@ -24,9 +24,6 @@ local KamareOptions = {
                 default_value = 0,
                 event = "SetPageDirection",
                 args = {0, 1},
-                enabled_func = function(configurable)
-                    return optionsutil.enableIfEquals(configurable, "view_mode", 2)
-                end,
                 help_text = _([[Set page reading direction for dual page mode. LTR (Left-to-Right) for comics/webtoons, RTL (Right-to-Left) for manga.]]),
             },
             {
