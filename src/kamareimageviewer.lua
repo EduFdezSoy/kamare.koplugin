@@ -368,6 +368,8 @@ function KamareImageViewer:_setupStatisticsInterface()
     if not self.bookinfo and self.ui.bookinfo then
         self.bookinfo = self.ui.bookinfo
     end
+    -- expose getCurrentPage to allow screenshoter to work
+    self.ui.getCurrentPage = function() return viewer_ref._images_list_cur end
 end
 
 function KamareImageViewer:_updateDimensions()
