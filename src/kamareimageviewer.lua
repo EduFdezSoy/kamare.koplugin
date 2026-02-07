@@ -7,6 +7,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Blitbuffer = require("ffi/blitbuffer")
 local UIManager = require("ui/uimanager")
+local FrontlightWidget = require("ui/widget/frontlightwidget")
 local Screen = Device.screen
 local logger = require("logger")
 local DocCache = require("document/doccache")
@@ -1083,6 +1084,12 @@ function KamareImageViewer:onSetBackgroundColor(value)
     self:update()
     UIManager:setDirty(self, "ui", self.main_frame.dimen)
 
+    return true
+end
+
+-- opens the frontlight widget
+function KamareImageViewer:onShowFrontlight()
+    UIManager:show(FrontlightWidget:new {})
     return true
 end
 
