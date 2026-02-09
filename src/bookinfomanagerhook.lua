@@ -174,12 +174,6 @@ local function fetchKavitaMetadata(filepath, BookInfoManager)
         return nil
     end
 
-    -- Check if KavitaClient is authenticated
-    if not KavitaClient.bearer then
-        logger.warn("Kamare: KavitaClient not authenticated, falling back to item_table")
-        return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
-    end
-
     -- For volumes and chapters, use item_table since the API endpoints expect series IDs
     -- and we have volume/chapter IDs. The item_table has all the info we need including number.
     if item_type == "volume" or item_type == "chapter" then
@@ -245,12 +239,6 @@ end
 
 -- Helper: Fetch and process cover image from Kavita API
 local function fetchKavitaCover(item_type, item_id, cover_specs, BookInfoManager)
-    -- Check if KavitaClient is authenticated
-    if not KavitaClient.bearer then
-        logger.dbg("Kamare: KavitaClient not authenticated, skipping cover fetch")
-        return nil
-    end
-
     -- Get cover specs (default to 600x600 like BookInfoManager)
     local max_cover_w = (cover_specs and cover_specs.max_cover_w) or 600
     local max_cover_h = (cover_specs and cover_specs.max_cover_h) or 600
