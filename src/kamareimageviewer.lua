@@ -632,9 +632,16 @@ end
 
 function KamareImageViewer:setFooterMode(mode)
     if not (self.footer and self.footer:isValidMode(mode)) then return false end
+    local old_visibility = self.footer:isVisible()
     self.footer:setMode(mode)
+    local new_visibility = self.footer:isVisible()
     self:syncAndSaveSettings()
-    self:updateFooter()
+
+    if old_visibility ~= new_visibility then
+        self:update()
+    else
+        self:updateFooter()
+    end
     return true
 end
 
@@ -1781,7 +1788,6 @@ function KamareImageViewer:switchToImageNum(page)
 
     self:updateImageOnly()
 
-    -- Mark canvas region as dirty after image update
     UIManager:setDirty(self, "partial", self.canvas.dimen)
 
     self:updateFooter()
@@ -1893,9 +1899,7 @@ function KamareImageViewer:onShowPrevSlice()
 end
 
 function KamareImageViewer:_checkAndOfferNextChapter()
-    if not (self.metadata and KavitaClient and KavitaClient.bearer) then
-        return
-    end
+    if not self.metadata then return end
 
     local seriesId = self.metadata.seriesId or self.metadata.series_id
     local volumeId = self.metadata.volumeId or self.metadata.volume_id
@@ -1962,7 +1966,7 @@ function KamareImageViewer:_checkAndOfferNextChapter()
 end
 
 function KamareImageViewer:_postViewProgress()
-    if not (self.metadata and KavitaClient and KavitaClient.bearer) then return end
+    if not self.metadata then return end
 
     local at_end = false
 

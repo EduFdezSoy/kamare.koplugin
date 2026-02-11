@@ -1,3 +1,5 @@
+local Device = require("device")
+local Version = require("version")
 local Cache = require("cache")
 local http = require("socket.http")
 local logger = require("logger")
@@ -12,7 +14,116 @@ local ApiCache = Cache:new{
     slots = 20,
 }
 
-local KavitaClient = {}
+local KavitaClient = {
+    device_id = nil,
+    client_info_header = nil,
+    auth_method = "bearer", -- bearer token (legacy) | apiKey in header x-api-key
+}
+
+-- Helper function to compare semantic version strings
+-- Returns: -1 if v1 < v2, 1 if v1 > v2, 0 if equal
+function KavitaClient:compareVersions(v1, v2)
+    -- Split version strings into components
+    local function splitVersion(version)
+        local components = {}
+        for component in version:gmatch("(%d+)") do
+            table.insert(components, tonumber(component))
+        end
+        return components
+    end
+
+    local comp1 = splitVersion(v1)
+    local comp2 = splitVersion(v2)
+
+    -- Pad the shorter version with zeros for comparison
+    local max_length = math.max(#comp1, #comp2)
+    for i = #comp1 + 1, max_length do
+        table.insert(comp1, 0)
+    end
+    for i = #comp2 + 1, max_length do
+        table.insert(comp2, 0)
+    end
+
+    -- Compare component by component
+    for i = 1, max_length do
+        if comp1[i] < comp2[i] then
+            return -1
+        elseif comp1[i] > comp2[i] then
+            return 1
+        end
+    end
+
+    return 0
+end
+
+function KavitaClient:setDeviceId(device_id)
+    self.device_id = device_id
+
+    return self.device_id
+end
+
+function KavitaClient:_generateClientInfoHeader()
+    if self.client_info_header then
+        return self.client_info_header
+    end
+
+    local device_info = {
+        appVersion = "unknown",
+        deviceType = "Tablet",
+        platform = "Unknown",
+        screenWidth = "unknown",
+        screenHeight = "unknown",
+        orientation = "unknown",
+        browser = "kamare",
+        browserVersion = "unknown"
+    }
+
+    local version = Version:getShortVersion() or "unknown"
+
+    if version and version ~= "" then
+        device_info.appVersion = version
+        device_info.browserVersion = version
+    end
+
+    if Device then
+        if Device.screen and Device.screen.getWidth and Device.screen.getHeight then
+            device_info.screenWidth = tostring(Device.screen:getWidth() or "unknown")
+            device_info.screenHeight = tostring(Device.screen:getHeight() or "unknown")
+        end
+
+        if Device.screen and Device.screen.getRotationMode then
+            local rotation_mode = Device.screen:getRotationMode()
+            if rotation_mode then
+                -- 0 or 2 = portrait, 1 or 3 = landscape
+                device_info.orientation = (rotation_mode == 0 or rotation_mode == 2) and "portrait" or "landscape"
+            end
+        end
+
+        -- Fallback: use screen dimensions if orientation still unknown
+        if device_info.orientation == "unknown" and
+           device_info.screenWidth ~= "unknown" and device_info.screenHeight ~= "unknown" then
+            local width = tonumber(device_info.screenWidth) or 0
+            local height = tonumber(device_info.screenHeight) or 0
+            device_info.orientation = width > height and "landscape" or "portrait"
+        end
+    end
+
+    -- Format: "web-app/version (Browser/version; Platform; DeviceType; screenWidth x screenHeight; orientation)"
+    local header = string.format("web-app/%s (%s/%s; %s; %s; %sx%s; %s)",
+        device_info.appVersion,
+        device_info.browser,
+        device_info.browserVersion,
+        device_info.platform,
+        device_info.deviceType,
+        device_info.screenWidth,
+        device_info.screenHeight,
+        device_info.orientation
+    )
+
+    self.client_info_header = header
+
+    return header
+end
 
 function KavitaClient:authenticate(server_url, apiKey)
     local base_endpoint = (server_url:gsub("/+$", "")) .. "/api/Plugin/authenticate"
@@ -26,6 +137,7 @@ function KavitaClient:authenticate(server_url, apiKey)
             method  = "POST",
             headers = {
                 ["Accept"] = "application/json",
+                ["X-Device-Id"] = self.device_id,
             },
             sink    = ltn12.sink.table(sink),
         })
@@ -131,10 +243,20 @@ function KavitaClient:apiRequest(path, opts)
     local query = opts.query
     local body = opts.body
     local extra_headers = opts.headers or {}
+    local accept_format = opts.accept_format or "json"  -- "json" or "text"
 
-    if not self.base_url or not self.bearer then
-        logger.warn("KavitaClient:apiRequest: missing base_url or bearer")
-        return -1, nil, "Missing base_url or bearer", nil
+    if not self.base_url then
+        logger.warn("KavitaClient:apiRequest: missing base_url")
+        return -1, nil, "Missing base_url", nil
+    end
+
+    -- Check authentication based on method
+    if self.auth_method == "apiKey" and (not self.api_key or self.api_key == "") then
+        logger.warn("KavitaClient:apiRequest: missing api_key for API key authentication")
+        return -1, nil, "Missing api_key", nil
+    elseif self.auth_method == "bearer" and (not self.bearer or self.bearer == "") then
+        logger.warn("KavitaClient:apiRequest: missing bearer for bearer authentication")
+        return -1, nil, "Missing bearer", nil
     end
 
     local base = self.base_url:gsub("/+$", "")
@@ -148,11 +270,24 @@ function KavitaClient:apiRequest(path, opts)
     full_url = full_url .. qs
 
     local headers = {
-        ["Accept"] = "application/json",
-        ["Authorization"] = "Bearer " .. self.bearer,
+        ["Accept"] = accept_format == "json" and "application/json" or "text/plain",
         ["Accept-Encoding"] = "identity",
+        ["X-Device-Id"] = self.device_id,
+        ["X-Kavita-Client"] = self:_generateClientInfoHeader(),
     }
+
+    -- Set authentication header based on method
+    if self.auth_method == "apiKey" and self.api_key and self.api_key ~= "" then
+        headers["x-api-key"] = self.api_key
+    elseif self.bearer and self.bearer ~= "" then
+        headers["Authorization"] = "Bearer " .. self.bearer
+    else
+        logger.warn("KavitaClient:apiRequest: no authentication available")
+        return -1, nil, "No authentication available", nil
+    end
+
     local source
+
     if type(body) == "table" then
         local payload = rapidjson.encode(body)
         headers["Content-Type"] = "application/json"
@@ -162,6 +297,7 @@ function KavitaClient:apiRequest(path, opts)
         headers["Content-Length"] = tostring(#body)
         source = ltn12.source.string(body)
     end
+
     for k, v in pairs(extra_headers) do headers[k] = v end
 
     local sink_tbl = {}
@@ -659,6 +795,72 @@ function KavitaClient:getSeriesMetadata(seriesId)
     end
 
     return data, code, headers, status, body
+end
+
+-- Fetch volume metadata: GET /api/Volume?volumeId={id}
+-- Returns: VolumeDto table, code, headers, status, raw_body
+function KavitaClient:getVolumeById(volumeId)
+    if not volumeId then
+        logger.warn("KavitaClient:getVolumeById: volumeId is required")
+        return nil, nil, nil, "volumeId required", nil
+    end
+
+    local data, code, headers, status, body = self:apiJSONCached("/api/Volume", {
+        method = "GET",
+        query  = { volumeId = volumeId },
+    }, 600, "kavita|volume")
+
+    if not data then
+        logger.warn("KavitaClient:getVolumeById: failed to fetch volume", volumeId,
+            "code:", code, "status:", status)
+    end
+
+    return data, code, headers, status, body
+end
+
+-- Fetch chapter metadata: GET /api/Chapter?chapterId={id}
+-- Returns: ChapterDto table, code, headers, status, raw_body
+function KavitaClient:getChapterById(chapterId)
+    if not chapterId then
+        logger.warn("KavitaClient:getChapterById: chapterId is required")
+        return nil, nil, nil, "chapterId required", nil
+    end
+
+    local data, code, headers, status, body = self:apiJSONCached("/api/Chapter", {
+        method = "GET",
+        query  = { chapterId = chapterId },
+    }, 600, "kavita|chapter")
+
+    if not data then
+        logger.warn("KavitaClient:getChapterById: failed to fetch chapter", chapterId,
+            "code:", code, "status:", status)
+    end
+
+    return data, code, headers, status, body
+end
+
+-- Get Kavita server version: GET /api/Plugin/version?apiKey={key}
+-- Returns: version string, code, headers, status
+function KavitaClient:getKavitaVersion()
+    if not self.api_key then
+        logger.warn("KavitaClient:getKavitaVersion: api_key not set")
+        return nil, -1, nil, "api_key required", nil
+    end
+
+    -- The API returns plain text, not JSON
+    local code, headers, status, body = self:apiRequest("/api/Plugin/version", {
+        method = "GET",
+        query  = { apiKey = self.api_key },
+        accept_format = "text",
+    })
+
+    if type(code) == "number" and code >= 200 and code < 300 then
+        logger.info("KavitaClient:getKavitaVersion: fetched version:", body)
+        return body, code, headers, status, body
+    else
+        logger.warn("KavitaClient:getKavitaVersion: failed to fetch version", "code:", code, "status:", status)
+        return nil, code, headers, status, body
+    end
 end
 
 return KavitaClient

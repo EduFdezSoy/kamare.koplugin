@@ -1,18 +1,20 @@
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local KavitaBrowser = require("kavitabrowser")
+local KavitaClient = require("kavitaclient")
 local logger = require("logger")
 local LuaSettings = require("luasettings")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local NetworkMgr = require("ui/network/manager")
+local random = require("frontend/random")
 local _ = require("gettext")
 
 local Kamare = WidgetContainer:extend{
     name = "kamare",
     kamare_settings_file = DataStorage:getSettingsDir() .. "/kamare.lua",
+    kamare_device_id = nil,
     servers = nil,
-    -- CoverBrowser integration
     has_coverbrowser = false,
     BookInfoManager = nil,
     CoverMenu = nil,
@@ -27,7 +29,13 @@ function Kamare:init()
         self.updated = true -- first run, force flush
         logger.info("Kamare: first run, initializing settings")
     end
+
     self.servers = self.kamare_settings:readSetting("servers", {})
+
+    self:_initializeDeviceId()
+
+    -- Set the device ID on KavitaClient
+    KavitaClient:setDeviceId(self.kamare_device_id)
 
     -- Try to load CoverBrowser modules
     self:loadCoverBrowserModules()
@@ -139,6 +147,19 @@ end
 function Kamare:onFlushSettings()
     -- Always flush to ensure settings persistence
     self:saveSettings()
+end
+
+function Kamare:_initializeDeviceId()
+    local saved_device_id = self.kamare_settings:readSetting("kamare_device_id")
+
+    if saved_device_id and saved_device_id ~= "" then
+        self.kamare_device_id = saved_device_id
+    else
+        self.kamare_device_id = random.uuid(true)
+
+        self.kamare_settings:saveSetting("kamare_device_id", self.kamare_device_id)
+        logger.info("Kamare: Generated new Kamare device ID:", self.kamare_device_id)
+    end
 end
 
 function Kamare:onResume()

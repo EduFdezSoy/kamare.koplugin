@@ -859,6 +859,72 @@ function KavitaBrowser:persistBearerToken(server_name, server_url, token)
     self.servers = servers
 end
 
+-- Persist server version in settings (similar to bearer token)
+function KavitaBrowser:persistServerVersion(server_name, server_url, version)
+    if not self.kamare_settings then
+        logger.warn("KavitaBrowser:persistServerVersion: no settings")
+        return
+    end
+
+    local servers = self.kamare_settings:readSetting("servers", {}) or {}
+    local found = false
+
+    if type(servers) == "table" then
+        for i, s in ipairs(servers) do
+            if type(s) == "table" and (s.url == server_url or s.name == server_name) then
+                -- Update version and metadata
+                servers[i].version = version
+                servers[i].updated_at = os.time()
+                found = true
+                break
+            end
+        end
+        if not found then
+            -- Insert a new entry with version info
+            table.insert(servers, {
+                name = server_name,
+                url = server_url,
+                version = version,
+                updated_at = os.time(),
+            })
+        end
+    else
+        servers = {
+            {
+                name = server_name,
+                url = server_url,
+                version = version,
+                updated_at = os.time(),
+            }
+        }
+    end
+
+    self.kamare_settings:saveSetting("servers", servers)
+    self.servers = servers
+end
+
+-- Check if we should use API key authentication (version >= 0.8.9.0)
+function KavitaBrowser:shouldUseApiKeyAuth(server_name, server_url)
+    if not self.kamare_settings then
+        return false  -- No settings → use legacy method (safe)
+    end
+
+    local servers = self.kamare_settings:readSetting("servers", {}) or {}
+
+    for _, server in ipairs(servers) do
+        if (server.url == server_url or server.name == server_name) and server.version then
+            if KavitaClient:compareVersions(server.version, "0.8.9.0") >= 0 then
+                return true  -- Use API key method
+            else
+                return false -- Use bearer method
+            end
+        end
+    end
+
+    -- No version info → use legacy bearer method (safe default)
+    return false
+end
+
 -- Authenticate after selecting a server using config (no dialog)
 function KavitaBrowser:authenticateAfterSelection(server_name, server_url)
     if not self.kamare_settings then
@@ -892,15 +958,39 @@ function KavitaBrowser:authenticateAfterSelection(server_name, server_url)
         return
     end
 
-    -- Authenticate and persist bearer token
-    local token, code, __, err = KavitaClient:authenticate(base_url, apiKey)
-    if not token then
-        logger.warn("KavitaBrowser:authenticateAfterSelection: authentication failed", code, err)
-        return
-    end
-
     -- Keep client api_key for endpoints that require it as query param
     KavitaClient.api_key = apiKey
+
+    -- Check if we should use API key authentication (version >= 0.8.9.0)
+    local should_use_api_key = self:shouldUseApiKeyAuth(server_name, server_url)
+
+    if should_use_api_key then
+        -- New method: Just use API key, skip bearer token request
+        KavitaClient.auth_method = "apiKey"
+        KavitaClient.base_url = base_url  -- Set base URL for API requests
+        logger.info("Using API key authentication for server:", server_name)
+    else
+        -- Old method: Request bearer token
+        local token, code, __, err = KavitaClient:authenticate(base_url, apiKey)
+        if not token then
+            logger.warn("KavitaBrowser:authenticateAfterSelection: authentication failed", code, err)
+            return
+        end
+        KavitaClient.bearer = token
+        KavitaClient.auth_method = "bearer"
+        self:persistBearerToken(server_name, server_url, token)
+    end
+
+    -- Check kavita server version for compatibility (for logging/info)
+    local version, code, __, status = KavitaClient:getKavitaVersion()
+
+    if version and code == 200 then
+        logger.info("Kavita server version check: " .. version .. " " .. code)
+        -- Persist the server version in settings
+        self:persistServerVersion(server_name, server_url, version)
+    else
+        logger.warn("Kavita server version check failed:", status or "unknown error", "code:", code)
+    end
 
     self:persistBearerToken(server_name, server_url, token)
 end
@@ -1372,7 +1462,7 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
         return
     end
 
-    -- Helper to wrap text in bold markers
+    -- Helper to wrap text in bold markers (Poor Text Formatting)
     local function bold(text)
         return "\u{FFF2}" .. text .. "\u{FFF3}"
     end
@@ -1409,18 +1499,22 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
         return #names > 0 and table.concat(names, ", ") or nil
     end
 
+    -- Build the info text
     local info_parts = {}
 
     -- Start with PTF header to enable formatting
     table.insert(info_parts, "\u{FFF1}")
 
+    -- Summary/Description (most important, show first)
     if metadata.summary and metadata.summary ~= "" then
         table.insert(info_parts, metadata.summary)
         table.insert(info_parts, "")
     end
 
+    -- Build metadata section
     local meta_items = {}
 
+    -- Publication Status
     if metadata.publicationStatus then
         local status_text
         if metadata.publicationStatus == 0 then
@@ -1434,12 +1528,12 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
         elseif metadata.publicationStatus == 4 then
             status_text = _("Ended")
         end
-
         if status_text then
             table.insert(meta_items, _("Status: ") .. status_text)
         end
     end
 
+    -- Release Year
     if metadata.releaseYear and metadata.releaseYear > 0 then
         table.insert(meta_items, _("Year: ") .. tostring(metadata.releaseYear))
     end
@@ -1449,20 +1543,24 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
         table.insert(info_parts, "")
     end
 
+    -- Genres
     local genres = formatTags(metadata.genres)
     if genres then
         table.insert(info_parts, bold(_("Genres:")) .. " " .. genres)
     end
 
+    -- Tags
     local tags = formatTags(metadata.tags)
     if tags then
         table.insert(info_parts, bold(_("Tags:")) .. " " .. tags)
     end
 
+    -- Add spacing if we have genres/tags
     if genres or tags then
         table.insert(info_parts, "")
     end
 
+    -- Credits section
     local credits = {}
 
     local writers = formatPersons(metadata.writers)
@@ -1480,6 +1578,7 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
         table.insert(credits, bold(_("Translators:")) .. " " .. translators)
     end
 
+    -- Art credits
     local cover_artists = formatPersons(metadata.coverArtists)
     if cover_artists then
         table.insert(credits, bold(_("Cover Art:")) .. " " .. cover_artists)
@@ -1518,6 +1617,7 @@ function KavitaBrowser:showSeriesInfo(series_name, series_id)
 
     local info_text = table.concat(info_parts, "\n")
 
+    -- Show the info in a TextViewer
     local text_viewer = TextViewer:new{
         title = series_name or _("Series Info"),
         text = info_text,

@@ -8,9 +8,6 @@ local util = require("util")
 
 local BookInfoManagerHook = {}
 
--- Reference to the Kamare plugin instance (set by Kamare:init())
-BookInfoManagerHook.kamare_instance = nil
-
 -- Original functions (saved when hook is installed)
 local original_getBookInfo = nil
 local original_getDocProps = nil
@@ -50,136 +47,21 @@ local function parseKavitaPath(filepath)
     return nil, nil, nil
 end
 
--- Helper: Fetch metadata from Kavita item_table (fallback when API unavailable)
--- This requires access to the KavitaBrowser instance to get item_table data
-local function fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
-    if not BookInfoManagerHook.kamare_instance then
-        logger.warn("Kamare: BookInfoManagerHook.kamare_instance not set, cannot fetch metadata")
-        return nil
-    end
-
-    -- Parse the virtual path
-    local server_name, item_type, item_id = parseKavitaPath(filepath)
-    if not server_name or not item_type or not item_id then
-        logger.warn("Kamare: Failed to parse Kavita path:", filepath)
-        return nil
-    end
-
-    logger.dbg("Kamare: Fetching metadata for", item_type, item_id, "from server", server_name)
-
-    -- Get the current browser instance if available
-    local browser = BookInfoManagerHook.kamare_instance.browser
-    if not browser then
-        logger.dbg("Kamare: No active browser instance, returning minimal metadata")
-        -- Return minimal metadata structure
-        return {
-            pages = 0,
-            title = string.format("%s %d", item_type, item_id),
-            authors = "",
-            series = nil,
-            series_index = nil,
-            language = "en",
-            keywords = nil,
-            description = nil,
-        }
-    end
-
-    -- Try to find the item in browser's item_table
-    local found_item = nil
-    if browser.item_table then
-        for _, item in ipairs(browser.item_table) do
-            if item_type == "series" and item.kavita_series and item.series and item.series.id == item_id then
-                found_item = item
-                break
-            elseif item_type == "volume" and item.kavita_volume and item.volume and item.volume.id == item_id then
-                found_item = item
-                break
-            elseif item_type == "chapter" and item.kavita_chapter and item.chapter and item.chapter.id == item_id then
-                found_item = item
-                break
-            end
-        end
-    end
-
-    if not found_item then
-        logger.dbg("Kamare: Item not found in browser item_table")
-        return {
-            pages = 0,
-            title = string.format("%s %d", item_type, item_id),
-            authors = "",
-            series = nil,
-            series_index = nil,
-            language = "en",
-            keywords = nil,
-            description = nil,
-        }
-    end
-
-    -- Build metadata structure from found item
-    local metadata = {
-        pages = 0,
-        title = found_item.text or "",
-        authors = "",
-        series = nil,
-        series_index = nil,
-        language = "en",
-        keywords = nil,
-        description = nil,
-    }
-
-    -- Add type-specific metadata
-    if item_type == "series" and found_item.series then
-        local s = found_item.series
-        metadata.series = s.localizedName or s.name
-        metadata.description = s.summary
-        metadata.pages = s.pages or 0
-
-    elseif item_type == "volume" and found_item.volume then
-        local v = found_item.volume
-        metadata.pages = v.pages or 0
-        metadata.series_index = v.number  -- Extract volume number
-        -- Set series name from browser context
-        metadata.series = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or nil
-        -- Only show series name in authors field for mixed lists (streams), not in series detail view
-        if not browser.current_series_id then
-            metadata.authors = metadata.series or ""
-        else
-            metadata.authors = ""
-        end
-
-    elseif item_type == "chapter" and found_item.chapter then
-        local c = found_item.chapter
-        metadata.pages = c.pages or 0
-        metadata.series_index = c.number  -- Extract chapter number
-        -- Set series name from browser context
-        metadata.series = browser.catalog_title or (browser.current_series_names and browser.current_series_names.name) or nil
-        -- Only show series name in authors field for mixed lists (streams), not in series detail view
-        if not browser.current_series_id then
-            metadata.authors = metadata.series or ""
-        else
-            metadata.authors = ""
-        end
-    end
-
-    logger.dbg("Kamare: Fetched metadata:", metadata.title, "pages:", metadata.pages)
-
-    return metadata
-end
-
 -- Helper: Fetch metadata from Kavita API
-local function fetchKavitaMetadata(filepath, BookInfoManager)
+local function fetchKavitaMetadata(filepath)
     local server_name, item_type, item_id = parseKavitaPath(filepath)
     if not server_name or not item_type or not item_id then
         logger.warn("Kamare: Failed to parse Kavita path:", filepath)
         return nil
     end
 
-    -- Check if KavitaClient is authenticated
-    if not KavitaClient.bearer then
-        logger.warn("Kamare: KavitaClient not authenticated, falling back to item_table")
-        return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
-    end
-
+    -- Fetch metadata based on item type
+    if item_type == "series" then
+        local series_metadata, code = KavitaClient:getSeriesMetadata(item_id)
+        if not series_metadata or code ~= 200 then
+            logger.warn("Kamare: Failed to fetch series metadata for:", item_id, "code:", code)
+            return nil
+        end
     -- For volumes and chapters, use item_table since the API endpoints expect series IDs
     -- and we have volume/chapter IDs. The item_table has all the info we need including number.
     if item_type == "volume" or item_type == "chapter" then
@@ -194,63 +76,134 @@ local function fetchKavitaMetadata(filepath, BookInfoManager)
         return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
     end
 
-    -- Also fetch SeriesDto for pages count and name
-    local series_dto, code2 = KavitaClient:getSeriesById(item_id)
-    if not series_dto or code2 ~= 200 then
-        logger.warn("Kamare: Failed to fetch series DTO for:", item_id, "code:", code2)
-        return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
-    end
+        -- Also fetch SeriesDto for pages count and name
+        local series_dto, code2 = KavitaClient:getSeriesById(item_id)
+        if not series_dto or code2 ~= 200 then
+            logger.warn("Kamare: Failed to fetch series DTO for:", item_id, "code:", code2)
+            return nil
+        end
 
-    -- Extract authors from writers array
-    local authors = {}
-    if series_metadata.writers then
-        for _, writer in ipairs(series_metadata.writers) do
-            if writer.name then
-                table.insert(authors, writer.name)
+        -- Extract authors from writers array
+        local authors = {}
+        if series_metadata.writers then
+            for _, writer in ipairs(series_metadata.writers) do
+                if writer.name then
+                    table.insert(authors, writer.name)
+                end
             end
         end
-    end
-    local authors_str = table.concat(authors, ", ")
+        local authors_str = table.concat(authors, ", ")
 
-    -- Extract genres and tags for keywords
-    local keywords = {}
-    if series_metadata.genres then
-        for _, genre in ipairs(series_metadata.genres) do
-            if genre.tag then
-                table.insert(keywords, genre.tag)
+        -- Extract genres and tags for keywords
+        local keywords = {}
+        if series_metadata.genres then
+            for _, genre in ipairs(series_metadata.genres) do
+                if genre.tag then
+                    table.insert(keywords, genre.tag)
+                end
             end
         end
-    end
-    if series_metadata.tags then
-        for _, tag in ipairs(series_metadata.tags) do
-            if tag.title then
-                table.insert(keywords, tag.title)
+        if series_metadata.tags then
+            for _, tag in ipairs(series_metadata.tags) do
+                if tag.title then
+                    table.insert(keywords, tag.title)
+                end
             end
         end
-    end
-    local keywords_str = table.concat(keywords, ", ")
+        local keywords_str = table.concat(keywords, ", ")
 
-    -- Build metadata structure (for series only - no series_index for series itself)
-    return {
-        pages = series_dto.pages or 0,
-        title = series_dto.localizedName or series_dto.name or "",
-        authors = authors_str,
-        series = series_dto.name or series_dto.localizedName,
-        series_index = nil,  -- Series itself has no index
-        language = series_metadata.language or "en",
-        keywords = keywords_str ~= "" and keywords_str or nil,
-        description = series_metadata.summary or nil,
-    }
+        return {
+            pages = series_dto.pages or 0,
+            title = series_dto.localizedName or series_dto.name or "",
+            authors = authors_str,
+            series = series_dto.name or series_dto.localizedName,
+            series_index = nil,  -- Series itself has no index
+            language = series_metadata.language or "en",
+            keywords = keywords_str ~= "" and keywords_str or nil,
+            description = type(series_metadata.summary) == "string" and series_metadata.summary or nil,
+        }
+
+    elseif item_type == "volume" then
+        local volume_metadata, code = KavitaClient:getVolumeById(item_id)
+        if not volume_metadata or code ~= 200 then
+            logger.warn("Kamare: Failed to fetch volume metadata for:", item_id, "code:", code)
+            return nil
+        end
+
+        -- Apply the same naming logic as KavitaBrowser:buildKavitaVolumeItems
+        local vol_prefix = volume_metadata.number and ("Volume " .. tostring(volume_metadata.number)) or nil
+        local title
+        if volume_metadata.name and volume_metadata.name ~= "" then
+            local lower = volume_metadata.name:lower()
+            local is_just_number = tonumber(volume_metadata.name) ~= nil and volume_metadata.name:match("^%d+$")
+            if not (lower:find("vol") or lower:find("volume") or is_just_number) and vol_prefix then
+                title = vol_prefix .. ": " .. volume_metadata.name
+            elseif is_just_number and vol_prefix then
+                title = vol_prefix
+            else
+                title = volume_metadata.name
+            end
+        else
+            title = vol_prefix or ("Volume #" .. tostring(volume_metadata.id or "?"))
+        end
+
+        return {
+            pages = volume_metadata.pages or 0,
+            title = title,
+            authors = "",
+            series = volume_metadata.seriesName or "",
+            series_index = volume_metadata.number,
+            language = "en",
+            keywords = nil,
+            description = type(volume_metadata.summary) == "string" and volume_metadata.summary or nil,
+        }
+
+    elseif item_type == "chapter" then
+        local chapter_metadata, code = KavitaClient:getChapterById(item_id)
+        if not chapter_metadata or code ~= 200 then
+            logger.warn("Kamare: Failed to fetch chapter metadata for:", item_id, "code:", code)
+            return nil
+        end
+
+        -- Apply the same naming logic as KavitaBrowser:buildKavitaChapterItems
+        local ch_prefix = chapter_metadata.number and ("Ch. " .. tostring(chapter_metadata.number)) or nil
+        local title
+
+        if chapter_metadata.isSpecial then
+            title = (chapter_metadata.titleName and chapter_metadata.titleName ~= "") and chapter_metadata.titleName
+                   or chapter_metadata.title
+                   or chapter_metadata.range
+                   or ("Special #" .. tostring(chapter_metadata.id or "?"))
+        elseif chapter_metadata.titleName and chapter_metadata.titleName ~= "" then
+            local lower = chapter_metadata.titleName:lower()
+            -- Skip prefix if title is just a number (avoids "Ch. 1: 1")
+            local is_just_number = tonumber(chapter_metadata.titleName) ~= nil and chapter_metadata.titleName:match("^%d+$")
+            if not (lower:find("ch") or lower:find("chap") or lower:find("chapter") or lower:find("vol") or lower:find("volume") or is_just_number) and ch_prefix then
+                title = ch_prefix .. ": " .. chapter_metadata.titleName
+            else
+                title = chapter_metadata.titleName
+            end
+        else
+            title = chapter_metadata.title or chapter_metadata.range or ch_prefix or ("Chapter #" .. tostring(chapter_metadata.id or "?"))
+        end
+
+        return {
+            pages = chapter_metadata.pages or 0,
+            title = title,
+            authors = "",
+            series = chapter_metadata.seriesName or "",
+            series_index = chapter_metadata.number,
+            language = "en",
+            keywords = nil,
+            description = type(chapter_metadata.summary) == "string" and chapter_metadata.summary or nil,
+        }
+    end
+
+    return nil
 end
 
 -- Helper: Fetch and process cover image from Kavita API
-local function fetchKavitaCover(item_type, item_id, cover_specs, BookInfoManager)
-    -- Check if KavitaClient is authenticated
-    if not KavitaClient.bearer then
-        logger.dbg("Kamare: KavitaClient not authenticated, skipping cover fetch")
-        return nil
-    end
-
+local function fetchKavitaCover(item_type, item_id, cover_specs)
     -- Get cover specs (default to 600x600 like BookInfoManager)
     local max_cover_w = (cover_specs and cover_specs.max_cover_w) or 600
     local max_cover_h = (cover_specs and cover_specs.max_cover_h) or 600
@@ -281,7 +234,7 @@ local function fetchKavitaCover(item_type, item_id, cover_specs, BookInfoManager
 
     -- Scale if larger than max dimensions (reuse BookInfoManager logic)
     if original_w > max_cover_w or original_h > max_cover_h then
-        local new_w, new_h = BookInfoManager.getCachedCoverSize(
+        local new_w, new_h = getCachedCoverSize(
             original_w, original_h, max_cover_w, max_cover_h
         )
         cover_bb = RenderImage:scaleBlitBuffer(cover_bb, new_w, new_h, true)
@@ -318,6 +271,20 @@ local function fetchKavitaCover(item_type, item_id, cover_specs, BookInfoManager
     }
 end
 
+-- Helper: Calculate cached cover size while maintaining aspect ratio (copied from BookInfoManager)
+function getCachedCoverSize(img_w, img_h, max_img_w, max_img_h)
+    local scale_factor
+    local width = math.floor(max_img_h * img_w / img_h + 0.5)
+    if max_img_w >= width then
+        max_img_w = width
+        scale_factor = max_img_w / img_w
+    else
+        max_img_h = math.floor(max_img_w * img_h / img_w + 0.5)
+        scale_factor = max_img_h / img_h
+    end
+    return max_img_w, max_img_h, scale_factor
+end
+
 -- Overridden getBookInfo function
 local function hooked_getBookInfo(self, filepath, do_cover_image)
     -- Check if this is a Kavita path
@@ -338,8 +305,8 @@ local function hooked_extractBookInfo(self, filepath, cover_specs)
         -- Parse the virtual path
         local _, item_type, item_id = parseKavitaPath(filepath)
 
-        -- Fetch metadata from Kavita API (with fallback to item_table)
-        local metadata = fetchKavitaMetadata(filepath, self)
+        -- Fetch metadata from Kavita API
+        local metadata = fetchKavitaMetadata(filepath)
         if not metadata then
             logger.warn("Kamare: Failed to fetch Kavita metadata for:", filepath)
             return false
@@ -348,7 +315,7 @@ local function hooked_extractBookInfo(self, filepath, cover_specs)
         -- Fetch cover if requested
         local cover_data = nil
         if cover_specs then
-            cover_data = fetchKavitaCover(item_type, item_id, cover_specs, self)
+            cover_data = fetchKavitaCover(item_type, item_id, cover_specs)
         end
 
         -- Build complete dbrow structure (all 25 columns)
@@ -436,8 +403,8 @@ local function hooked_getDocProps(self, filepath)
             return cached
         end
 
-        -- Cache miss - fetch from Kavita
-        local metadata = fetchKavitaMetadataFromItemTable(filepath, self)
+        -- Cache miss - fetch from Kavita API
+        local metadata = fetchKavitaMetadata(filepath)
 
         if metadata then
             -- Write to cache using setBookInfoProperties
@@ -471,9 +438,6 @@ function BookInfoManagerHook:install(kamare_instance)
     -- This makes DocumentRegistry:hasProvider() return true for .kavita files
     -- so BookInfoManager will query the database instead of returning a stub
     DocumentRegistry:addProvider("kavita", "application/x-kavita", KavitaProvider, 100)
-
-    -- Save reference to Kamare instance
-    self.kamare_instance = kamare_instance
 
     -- Save original functions
     original_getBookInfo = BookInfoManager.getBookInfo
@@ -510,7 +474,6 @@ function BookInfoManagerHook:uninstall()
     original_getBookInfo = nil
     original_getDocProps = nil
     original_extractBookInfo = nil
-    self.kamare_instance = nil
 end
 
 return BookInfoManagerHook
