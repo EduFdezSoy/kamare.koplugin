@@ -1,4 +1,5 @@
 local optionsutil = require("ui/data/optionsutil")
+local Device = require("device")
 local _ = require("gettext")
 
 local KamareOptions = {
@@ -187,6 +188,14 @@ local KamareOptions = {
                 default_value = 1,
                 event = "SetFooterMode",
                 help_text = _([[Choose what information to display in the footer.]]),
+            },
+            {
+                name = "frontlight",
+                name_text = _("Frontlight"),
+                toggle = { _("Adjust") },
+                values = { 0 },
+                event = "ShowFrontlight",
+                enabled_func = function() return Device:hasFrontlight() end,
             }
         }
     }
