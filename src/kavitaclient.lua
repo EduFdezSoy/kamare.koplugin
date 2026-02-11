@@ -661,4 +661,46 @@ function KavitaClient:getSeriesMetadata(seriesId)
     return data, code, headers, status, body
 end
 
+-- Fetch volume metadata: GET /api/Volume?volumeId={id}
+-- Returns: VolumeDto table, code, headers, status, raw_body
+function KavitaClient:getVolumeById(volumeId)
+    if not volumeId then
+        logger.warn("KavitaClient:getVolumeById: volumeId is required")
+        return nil, nil, nil, "volumeId required", nil
+    end
+
+    local data, code, headers, status, body = self:apiJSONCached("/api/Volume", {
+        method = "GET",
+        query  = { volumeId = volumeId },
+    }, 600, "kavita|volume")
+
+    if not data then
+        logger.warn("KavitaClient:getVolumeById: failed to fetch volume", volumeId,
+            "code:", code, "status:", status)
+    end
+
+    return data, code, headers, status, body
+end
+
+-- Fetch chapter metadata: GET /api/Chapter?chapterId={id}
+-- Returns: ChapterDto table, code, headers, status, raw_body
+function KavitaClient:getChapterById(chapterId)
+    if not chapterId then
+        logger.warn("KavitaClient:getChapterById: chapterId is required")
+        return nil, nil, nil, "chapterId required", nil
+    end
+
+    local data, code, headers, status, body = self:apiJSONCached("/api/Chapter", {
+        method = "GET",
+        query  = { chapterId = chapterId },
+    }, 600, "kavita|chapter")
+
+    if not data then
+        logger.warn("KavitaClient:getChapterById: failed to fetch chapter", chapterId,
+            "code:", code, "status:", status)
+    end
+
+    return data, code, headers, status, body
+end
+
 return KavitaClient
