@@ -602,7 +602,7 @@ function KamareImageViewer:getFooterState()
         is_scroll_mode = (self.view_mode == 1) or false,
         scroll_progress = scroll_progress,
         time_estimate = time_estimate,
-        is_rtl_mode = (self.view_mode == 2 and self.page_direction == 1) or false,
+        is_rtl_mode = (self.page_direction == 1) or false,
     }
 
     return footer_state
@@ -1789,7 +1789,7 @@ function KamareImageViewer:switchToImageNum(page)
 end
 
 function KamareImageViewer:onShowNextImage()
-    local is_rtl = self.view_mode == 2 and self.page_direction == 1
+    local is_rtl = self.page_direction == 1
 
     if is_rtl then
         return self:_showPrevImageInternal()
@@ -1799,8 +1799,8 @@ function KamareImageViewer:onShowNextImage()
 end
 
 function KamareImageViewer:onShowPrevImage()
-    -- In RTL dual-page mode, "prev" in reading direction means going forward in page numbers
-    local is_rtl = self.view_mode == 2 and self.page_direction == 1
+    -- In RTL mode, "prev" in reading direction means going forward in page numbers
+    local is_rtl = self.page_direction == 1
 
     if is_rtl then
         return self:_showNextImageInternal()
