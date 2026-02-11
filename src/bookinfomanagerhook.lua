@@ -62,6 +62,19 @@ local function fetchKavitaMetadata(filepath)
             logger.warn("Kamare: Failed to fetch series metadata for:", item_id, "code:", code)
             return nil
         end
+    -- For volumes and chapters, use item_table since the API endpoints expect series IDs
+    -- and we have volume/chapter IDs. The item_table has all the info we need including number.
+    if item_type == "volume" or item_type == "chapter" then
+        logger.dbg("Kamare: Fetching volume/chapter metadata from item_table")
+        return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
+    end
+
+    -- For series, fetch metadata from Kavita API
+    local series_metadata, code = KavitaClient:getSeriesMetadata(item_id)
+    if not series_metadata or code ~= 200 then
+        logger.warn("Kamare: Failed to fetch series metadata for:", item_id, "code:", code)
+        return fetchKavitaMetadataFromItemTable(filepath, BookInfoManager)
+    end
 
         -- Also fetch SeriesDto for pages count and name
         local series_dto, code2 = KavitaClient:getSeriesById(item_id)
